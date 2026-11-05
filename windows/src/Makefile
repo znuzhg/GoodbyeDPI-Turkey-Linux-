@@ -1,4 +1,4 @@
-# Windows x64 build for the native WinDivert backend.
+# Windows x64 build for the native WinDivert backend (MSYS2 UCRT64 or MinGW-w64 cross compiler).
 # Run from this directory (or use: make -C windows/src ...).
 ifndef MSYSTEM
 CPREFIX ?= x86_64-w64-mingw32-
@@ -10,7 +10,7 @@ WINDIVERTLIBS ?= $(WINDIVERT_DIR)/x64
 
 TARGET = goodbyedpi.exe
 BIT64 ?= 1
-LIBS = -L$(WINDIVERTLIBS) -lWinDivert -lws2_32 -l:libssp.a
+LIBS = -L$(WINDIVERTLIBS) -lWinDivert -lws2_32
 CC = $(CPREFIX)gcc
 
 CCWINDRES = $(CPREFIX)windres
