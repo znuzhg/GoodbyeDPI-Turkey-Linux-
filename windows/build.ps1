@@ -4,7 +4,7 @@ Set-StrictMode -Version Latest
 
 $version = 'WinDivert-2.2.2-A'
 $sha256 = '__PINNED_SHA256_TO_BE_SET_AFTER_CI_DOWNLOAD__'
-$url = 'https://reqrypt.org/download/WinDivert-2.2.2-A.zip'
+$url = 'https://github.com/basil00/WinDivert/releases/download/v2.2.2/WinDivert-2.2.2-A.zip'
 
 $windowsDir = $PSScriptRoot
 $depsDir = Join-Path $windowsDir 'deps'

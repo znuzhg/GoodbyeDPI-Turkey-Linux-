@@ -34,7 +34,7 @@ jobs:
         run: |
           set -euo pipefail
           curl --fail --location --retry 3 \
-            https://reqrypt.org/download/WinDivert-2.2.2-A.zip \
+            https://github.com/basil00/WinDivert/releases/download/v2.2.2/WinDivert-2.2.2-A.zip \
             --output WinDivert-2.2.2-A.zip
           sha256sum WinDivert-2.2.2-A.zip | tee WinDivert-2.2.2-A.sha256
           echo "WinDivert archive downloaded from the official GitHub release; pin this digest in the follow-up hardening change."
