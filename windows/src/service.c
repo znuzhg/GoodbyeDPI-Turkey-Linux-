@@ -28,24 +28,37 @@ int service_register(int argc, char *argv[])
      * so we should copy all arguments first and then
      * handle the failure.
      */
-    // Save command line arguments to use them later in service_main
+    // Preserve the original command line for service_main.
     if (!service_argc && !service_argv) {
-        service_argc = argc;
-        service_argv = calloc((size_t)(argc + 1), sizeof(void*));
+        if (argc <= 0 || !argv)
+            return -1;
+
+        service_argv = calloc((size_t)argc + 1, sizeof(*service_argv));
+        if (!service_argv)
+            return -1;
+
         for (i = 0; i < argc; i++) {
-            service_argv[i] = strdup(argv[i]);
+            if (!argv[i] || !(service_argv[i] = strdup(argv[i]))) {
+                while (i > 0)
+                    free(service_argv[--i]);
+                free(service_argv);
+                service_argv = NULL;
+                return -1;
+            }
         }
+        service_argc = argc;
     }
 
-    // Start the service control dispatcher
+    // StartServiceCtrlDispatcher blocks until the service has stopped.
     ret = StartServiceCtrlDispatcher(ServiceTable);
 
-    // Clean up allocated memory if service registration failed or service stopped
-    if (service_argc && service_argv) {
-        for (i = 0; i < service_argc; i++) {
+    // Release the saved arguments whether dispatch failed or the service stopped.
+    if (service_argv) {
+        for (i = 0; i < service_argc; i++)
             free(service_argv[i]);
-        }
         free(service_argv);
+        service_argv = NULL;
+        service_argc = 0;
     }
 
     return ret;
@@ -90,10 +103,23 @@ void service_controlhandler(DWORD request)
     {
         case SERVICE_CONTROL_STOP:
         case SERVICE_CONTROL_SHUTDOWN:
-            // Perform cleanup before service stops
+            if (ServiceStatus.dwCurrentState != SERVICE_RUNNING)
+                break;
+
+            // Tell the Service Control Manager that shutdown is in progress.
+            ServiceStatus.dwCurrentState = SERVICE_STOP_PENDING;
+            ServiceStatus.dwControlsAccepted = 0;
+            ServiceStatus.dwCheckPoint = 1;
+            ServiceStatus.dwWaitHint = 5000;
+            SetServiceStatus(hStatus, &ServiceStatus);
+
+            // Closing WinDivert handles makes the packet receive loop exit.
             deinit_all();
             ServiceStatus.dwWin32ExitCode = 0;
-            ServiceStatus.dwCurrentState  = SERVICE_STOPPED;
+            ServiceStatus.dwCurrentState = SERVICE_STOPPED;
+            ServiceStatus.dwCheckPoint = 0;
+            ServiceStatus.dwWaitHint = 0;
+            break;
         default:
             break;
     }
