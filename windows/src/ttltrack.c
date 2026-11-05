@@ -42,36 +42,36 @@ static time_t last_cleanup = 0;
 static tcp_connrecord_t *conntrack = NULL;
 
 // Fill connection key with appropriate data
-inline static void fill_key_data(char *key, const uint8_t is_ipv6, const uint32_t srcip[4],
-                    const uint32_t dstip[4], const uint16_t srcport, const uint16_t dstport)
+inline static void fill_key_data(char *key, const uint8_t is_ipv6, const uint32_t *srcip,
+                    const uint32_t *dstip, const uint16_t srcport, const uint16_t dstport)
 {
     unsigned int offset = 0;
 
     if (is_ipv6) {
-        *(uint8_t*)(key) = '6';
+        key[0] = '6';
         offset += sizeof(uint8_t);
-        ipv6_copy_addr((uint32_t*)(key + offset), srcip);
+        ipv6_copy_addr(key + offset, srcip);
         offset += sizeof(uint32_t) * 4;
-        ipv6_copy_addr((uint32_t*)(key + offset), dstip);
+        ipv6_copy_addr(key + offset, dstip);
         offset += sizeof(uint32_t) * 4;
     }
     else {
-        *(uint8_t*)(key) = '4';
+        key[0] = '4';
         offset += sizeof(uint8_t);
-        ipv4_copy_addr((uint32_t*)(key + offset), srcip);
+        ipv4_copy_addr(key + offset, srcip);
         offset += sizeof(uint32_t) * 4;
-        ipv4_copy_addr((uint32_t*)(key + offset), dstip);
+        ipv4_copy_addr(key + offset, dstip);
         offset += sizeof(uint32_t) * 4;
     }
 
-    *(uint16_t*)(key + offset) = srcport;
+    memcpy(key + offset, &srcport, sizeof(srcport));
     offset += sizeof(srcport);
-    *(uint16_t*)(key + offset) = dstport;
+    memcpy(key + offset, &dstport, sizeof(dstport));
     offset += sizeof(dstport);
 }
 
 // Extract connection data from key
-inline static void fill_data_from_key(uint8_t *is_ipv6, uint32_t srcip[4], uint32_t dstip[4],
+inline static void fill_data_from_key(uint8_t *is_ipv6, uint32_t *srcip, uint32_t *dstip,
                                      uint16_t *srcport, uint16_t *dstport, const char *key)
 {
     unsigned int offset = 0;
@@ -79,22 +79,22 @@ inline static void fill_data_from_key(uint8_t *is_ipv6, uint32_t srcip[4], uint3
     if (key[0] == '6') {
         *is_ipv6 = 1;
         offset += sizeof(uint8_t);
-        ipv6_copy_addr(srcip, (uint32_t*)(key + offset));
+        ipv6_copy_addr(srcip, key + offset);
         offset += sizeof(uint32_t) * 4;
-        ipv6_copy_addr(dstip, (uint32_t*)(key + offset));
+        ipv6_copy_addr(dstip, key + offset);
         offset += sizeof(uint32_t) * 4;
     }
     else {
         *is_ipv6 = 0;
         offset += sizeof(uint8_t);
-        ipv4_copy_addr(srcip, (uint32_t*)(key + offset));
+        ipv4_copy_addr(srcip, key + offset);
         offset += sizeof(uint32_t) * 4;
-        ipv4_copy_addr(dstip, (uint32_t*)(key + offset));
+        ipv4_copy_addr(dstip, key + offset);
         offset += sizeof(uint32_t) * 4;
     }
-    *srcport = *(uint16_t*)(key + offset);
+    memcpy(srcport, key + offset, sizeof(*srcport));
     offset += sizeof(*srcport);
-    *dstport = *(uint16_t*)(key + offset);
+    memcpy(dstport, key + offset, sizeof(*dstport));
     offset += sizeof(*dstport);
 }
 
