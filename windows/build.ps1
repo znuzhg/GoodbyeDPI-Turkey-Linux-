@@ -162,48 +162,17 @@ if ($requestedMsysRoot) {
 }
 
 if (-not $msysRoot) {
-    Write-Host 'MSYS2 was not found. Resolving the newest stable official x64 installer...'
+    # Pin a dated stable MSYS2 release so bootstrap does not depend on the
+    # /releases/latest endpoint, which may point at the rolling nightly channel.
+    $msys2ReleaseTag = '2026-09-27'
+    $installerName = 'msys2-x86_64-20260927.exe'
+    $installerUrl = 'https://github.com/msys2/msys2-installer/releases/download/2026-09-27/msys2-x86_64-20260927.exe'
+    $expectedInstallerHash = '416d506c839a2da4bc184eeec8cbaaf1055ee698618228c62dfc4232a6970f0e'
+    $installerPath = Join-Path $cacheDir $installerName
 
-    # /releases/latest currently points to the rolling nightly channel for MSYS2.
-    # Select the first dated, non-prerelease release that exposes a SHA-256 digest.
-    $releaseApi = 'https://api.github.com/repos/msys2/msys2-installer/releases?per_page=100'
-    $apiHeaders = @{
-        'User-Agent' = 'GoodbyeDPI-Turkey-build'
-        'Accept' = 'application/vnd.github+json'
-        'X-GitHub-Api-Version' = '2022-11-28'
-    }
-    $releases = @(Invoke-RestMethod -Uri $releaseApi -Headers $apiHeaders -TimeoutSec 60)
+    Write-Host "MSYS2 was not found. Using official stable release $msys2ReleaseTag."
+    Invoke-CompatDownload -Uri $installerUrl -OutFile $installerPath
 
-    $release = $null
-    $installerAsset = $null
-    foreach ($candidateRelease in $releases) {
-        if ($candidateRelease.draft -or $candidateRelease.prerelease -or
-            $candidateRelease.tag_name -notmatch '^\d{4}-\d{2}-\d{2}$') {
-            continue
-        }
-
-        $candidateAsset = $candidateRelease.assets |
-            Where-Object { $_.name -match '^msys2-x86_64-\d{8}\.exe$' } |
-            Select-Object -First 1
-
-        if ($null -ne $candidateAsset -and
-            $candidateAsset.browser_download_url -and
-            $candidateAsset.digest -match '^sha256:[0-9a-fA-F]{64}$') {
-            $release = $candidateRelease
-            $installerAsset = $candidateAsset
-            break
-        }
-    }
-
-    if ($null -eq $release -or $null -eq $installerAsset) {
-        throw 'Could not find a dated stable MSYS2 x64 installer with SHA-256 metadata in the official GitHub releases.'
-    }
-    Write-Host "Selected stable MSYS2 release: $($release.tag_name)"
-
-    $installerPath = Join-Path $cacheDir $installerAsset.name
-    Invoke-CompatDownload -Uri $installerAsset.browser_download_url -OutFile $installerPath
-
-    $expectedInstallerHash = $installerAsset.digest.Substring(7).ToLowerInvariant()
     $actualInstallerHash = (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($actualInstallerHash -ne $expectedInstallerHash) {
         Remove-Item -LiteralPath $installerPath -Force
