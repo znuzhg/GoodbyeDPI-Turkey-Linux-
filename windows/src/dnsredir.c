@@ -161,10 +161,13 @@ static int add_udp_conntrack(const uint32_t srcip[4], const uint16_t srcport,
                              const uint8_t is_ipv6
                             )
 {
-    if (!(srcip && srcport && dstip && dstport))
+    if (!srcip || !dstip)
         return FALSE;
 
-    udp_connrecord_t *tmp_connrecord = malloc(sizeof(udp_connrecord_t));
+    udp_connrecord_t *tmp_connrecord = malloc(sizeof(*tmp_connrecord));
+    if (!tmp_connrecord)
+        return FALSE;
+
     construct_key(srcip, srcport, tmp_connrecord->key, is_ipv6);
 
     if (!check_get_udp_conntrack_key(tmp_connrecord->key, NULL)) {
@@ -213,16 +216,24 @@ static void dns_cleanup() {
  * Check if a packet looks like a DNS request/response
  */
 int dns_is_dns_packet(const char *packet_data, const UINT packet_dataLen, const int outgoing) {
-    if (packet_dataLen < 16) return FALSE;
+    uint16_t flags = 0;
+    uint16_t answer_count = 0;
 
-    if (outgoing && (ntohs(*(const uint16_t*)(packet_data + 2)) & 0xFA00) == 0 &&
-        (ntohs(*(const uint32_t*)(packet_data + 6))) == 0) {
+    if (!packet_data || packet_dataLen < 16)
+        return FALSE;
+
+    /* Copy packet fields to aligned locals before byte-order conversion. */
+    memcpy(&flags, packet_data + 2, sizeof(flags));
+    memcpy(&answer_count, packet_data + 6, sizeof(answer_count));
+    flags = ntohs(flags);
+    answer_count = ntohs(answer_count);
+
+    if (outgoing && (flags & 0xFA00) == 0 && answer_count == 0)
         return TRUE;
-    }
-    else if (!outgoing &&
-        (ntohs(*(const uint16_t*)(packet_data + 2)) & 0xF800) == 0x8000) {
+
+    if (!outgoing && (flags & 0xF800) == 0x8000)
         return TRUE;
-    }
+
     return FALSE;
 }
 
@@ -235,7 +246,7 @@ int dns_handle_outgoing(const uint32_t srcip[4], const uint16_t srcport,
                         const char *packet_data, const UINT packet_dataLen,
                         const uint8_t is_ipv6)
 {
-    if (packet_dataLen < 16)
+    if (!srcip || !dstip || !packet_data || packet_dataLen < 16)
         return FALSE;
 
     dns_cleanup();
@@ -260,7 +271,7 @@ int dns_handle_incoming(const uint32_t srcip[4], const uint16_t srcport,
     char key[UDP_CONNRECORD_KEY_LEN];
     udp_connrecord_t *tmp_connrecord = NULL;
 
-    if (packet_dataLen < 16 || !conn_info)
+    if (!srcip || !packet_data || packet_dataLen < 16 || !conn_info)
         return FALSE;
 
     dns_cleanup();
