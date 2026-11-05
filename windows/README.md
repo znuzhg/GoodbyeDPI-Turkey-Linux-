@@ -30,7 +30,7 @@ The script expects the MinGW-w64 compiler tools and GNU Make to be installed. It
 4. Open PowerShell in that extracted folder **as Administrator** and run:
 
 ```powershell
-.\\run.cmd
+.\run.cmd
 ```
 
 Start with the one-time console mode. Stop it with Ctrl+C. Do not install the auto-start service until the one-time run has been checked on your connection.
