@@ -36,7 +36,7 @@
 typedef struct udp_connrecord {
     char key[UDP_CONNRECORD_KEY_LEN]; // Lookup key
     time_t time;         // Time when record was added
-    uint32_t dstip[4];   // Destination IP (can be IPv4 or IPv6)
+    uint32_t *dstip;   // Destination IP (can be IPv4 or IPv6)
     uint16_t dstport;    // Destination port
     UT_hash_handle hh;   // Makes this structure hashable with uthash
 } udp_connrecord_t;
@@ -67,36 +67,36 @@ void flush_dns_cache() {
 /**
  * Fill key data structure with connection information
  */
-inline static void fill_key_data(char *key, const uint8_t is_ipv6, const uint32_t srcip[4],
+inline static void fill_key_data(char *key, const uint8_t is_ipv6, const uint32_t *srcip,
                           const uint16_t srcport)
 {
     if (is_ipv6) {
-        *(uint8_t*)(key) = '6';
-        ipv6_copy_addr((uint32_t*)(key + sizeof(uint8_t)), srcip);
+        key[0] = '6';
+        ipv6_copy_addr(key + sizeof(uint8_t), srcip);
     }
     else {
-        *(uint8_t*)(key) = '4';
-        ipv4_copy_addr((uint32_t*)(key + sizeof(uint8_t)), srcip);
+        key[0] = '4';
+        ipv4_copy_addr(key + sizeof(uint8_t), srcip);
     }
 
-    *(uint16_t*)(key + sizeof(uint8_t) + sizeof(uint32_t) * 4) = srcport;
+    memcpy(key + sizeof(uint8_t) + sizeof(uint32_t) * 4, &srcport, sizeof(srcport));
 }
 
 /**
  * Extract connection information from key data
  */
-inline static void fill_data_from_key(uint8_t *is_ipv6, uint32_t srcip[4], uint16_t *srcport,
+inline static void fill_data_from_key(uint8_t *is_ipv6, uint32_t *srcip, uint16_t *srcport,
                                       const char *key)
 {
     if (key[0] == '6') {
         *is_ipv6 = 1;
-        ipv6_copy_addr(srcip, (uint32_t*)(key + sizeof(uint8_t)));
+        ipv6_copy_addr(srcip, key + sizeof(uint8_t));
     }
     else {
         *is_ipv6 = 0;
-        ipv4_copy_addr(srcip, (uint32_t*)(key + sizeof(uint8_t)));
+        ipv4_copy_addr(srcip, key + sizeof(uint8_t));
     }
-    *srcport = *(uint16_t*)(key + sizeof(uint8_t) + sizeof(uint32_t) * 4);
+    memcpy(srcport, key + sizeof(uint8_t) + sizeof(uint32_t) * 4, sizeof(*srcport));
 }
 
 /**
@@ -157,7 +157,7 @@ static int check_get_udp_conntrack_key(const char *key, udp_connrecord_t **connr
  * Add a new DNS connection to the tracking table
  */
 static int add_udp_conntrack(const uint32_t srcip[4], const uint16_t srcport,
-                             const uint32_t dstip[4], const uint16_t dstport,
+                             const uint32_t *dstip, const uint16_t dstport,
                              const uint8_t is_ipv6
                             )
 {
