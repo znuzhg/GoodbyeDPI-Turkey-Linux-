@@ -48,15 +48,12 @@ if errorlevel 1 (
 
   echo Updating the existing GoodbyeDPI service at this installation path...
   sc.exe stop GoodbyeDPI >nul 2>&1
-  for /L %%I in (1,1,15) do (
-    sc.exe query GoodbyeDPI | findstr.exe /I "STOPPED" >nul
-    if not errorlevel 1 goto service_stopped
-    timeout /t 1 /nobreak >nul
+  call :wait_for_stop
+  if errorlevel 1 (
+    echo GoodbyeDPI service did not stop within 15 seconds.
+    exit /b 1
   )
-  echo GoodbyeDPI service did not stop within 15 seconds.
-  exit /b 1
 
-  :service_stopped
   sc.exe config GoodbyeDPI binPath= "%SERVICE_BINPATH%" start= auto
   if errorlevel 1 (
     echo Failed to update the existing GoodbyeDPI service configuration.
@@ -72,3 +69,12 @@ if errorlevel 1 (
 )
 echo GoodbyeDPI service installed and started.
 echo Do not move this folder while the service is installed.
+exit /b 0
+
+:wait_for_stop
+for /L %%I in (1,1,15) do (
+  sc.exe query GoodbyeDPI | findstr.exe /I "STOPPED" >nul
+  if not errorlevel 1 exit /b 0
+  timeout /t 1 /nobreak >nul
+)
+exit /b 1
