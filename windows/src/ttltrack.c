@@ -99,7 +99,7 @@ inline static void fill_data_from_key(uint8_t *is_ipv6, uint32_t *srcip, uint32_
 }
 
 // Create connection tracking key from IP and port information
-inline static void construct_key(const uint32_t srcip[4], const uint32_t dstip[4],
+inline static void construct_key(const uint32_t *srcip, const uint32_t *dstip,
                                  const uint16_t srcport, const uint16_t dstport,
                                  char *key, const uint8_t is_ipv6)
 {
@@ -145,7 +145,7 @@ static int check_get_tcp_conntrack_key(const char *key, tcp_connrecord_t **connr
 }
 
 // Add connection to tracking table
-static int add_tcp_conntrack(const uint32_t srcip[4], const uint32_t dstip[4],
+static int add_tcp_conntrack(const uint32_t *srcip, const uint32_t *dstip,
                              const uint16_t srcport, const uint16_t dstport,
                              const uint8_t is_ipv6, const uint8_t ttl
                             )
@@ -193,7 +193,7 @@ static void tcp_cleanup() {
 }
 
 // Process incoming TCP packets to track TTL values
-int tcp_handle_incoming(uint32_t srcip[4], uint32_t dstip[4],
+int tcp_handle_incoming(uint32_t *srcip, uint32_t *dstip,
                         uint16_t srcport, uint16_t dstport,
                         uint8_t is_ipv6, uint8_t ttl)
 {
@@ -207,7 +207,7 @@ int tcp_handle_incoming(uint32_t srcip[4], uint32_t dstip[4],
 }
 
 // Process outgoing TCP packets, match with tracked connections
-int tcp_handle_outgoing(uint32_t srcip[4], uint32_t dstip[4],
+int tcp_handle_outgoing(uint32_t *srcip, uint32_t *dstip,
                         uint16_t srcport, uint16_t dstport,
                         tcp_conntrack_info_t *conn_info,
                         uint8_t is_ipv6)
