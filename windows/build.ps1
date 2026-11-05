@@ -52,6 +52,20 @@ function Test-AsciiNoSpacePath {
     return ($Path -notmatch '[^\x21-\x7E]')
 }
 
+function Test-WritableDirectory {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    try {
+        New-Item -ItemType Directory -Path $Path -Force | Out-Null
+        $probe = Join-Path $Path '.goodbyedpi-write-test'
+        [System.IO.File]::WriteAllText($probe, 'test')
+        Remove-Item -LiteralPath $probe -Force
+        return $true
+    } catch {
+        return $false
+    }
+}
+
 function Test-WritableEmptyDirectory {
     param([Parameter(Mandatory = $true)][string]$Path)
 
@@ -103,7 +117,7 @@ $stagingCandidates += 'C:\gdpibuild'
 $stagingRoot = $null
 foreach ($candidate in $stagingCandidates) {
     if (Test-AsciiNoSpacePath -Path $candidate -and
-        (Test-WritableEmptyDirectory -Path $candidate)) {
+        (Test-WritableDirectory -Path $candidate)) {
         $stagingRoot = $candidate
         break
     }
