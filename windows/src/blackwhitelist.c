@@ -42,35 +42,42 @@ static int add_hostname(const char *host) {
     if (!host)
         return FALSE;
 
-    blackwhitelist_record_t *tmp_record = malloc(sizeof(blackwhitelist_record_t));
-    char *host_c = NULL;
+    if (check_get_hostname(host))
+        return FALSE;
 
-    if (!check_get_hostname(host)) {
-        host_c = strdup(host);
-        tmp_record->host = host_c;
-        HASH_ADD_KEYPTR(hh, blackwhitelist, tmp_record->host,
-                        strlen(tmp_record->host), tmp_record);
-        debug("Added host %s\n", host_c);
-        return TRUE;
+    blackwhitelist_record_t *tmp_record = malloc(sizeof(*tmp_record));
+    if (!tmp_record)
+        return FALSE;
+
+    char *host_c = strdup(host);
+    if (!host_c) {
+        free(tmp_record);
+        return FALSE;
     }
-    debug("Not added host %s\n", host);
-    free(tmp_record);
-    if (host_c)
-        free(host_c);
-    return FALSE;
+
+    tmp_record->host = host_c;
+    HASH_ADD_KEYPTR(hh, blackwhitelist, tmp_record->host,
+                    strlen(tmp_record->host), tmp_record);
+    debug("Added host %s\n", host_c);
+    return TRUE;
 }
 
 /**
  * Load a list of hostnames from a file into the blackwhitelist
  */
 int blackwhitelist_load_list(const char *filename) {
-    char *line = malloc(HOST_MAXLEN + 1);
     size_t linelen = HOST_MAXLEN + 1;
     int cnt = 0;
     ssize_t read;
-
     FILE *fp = fopen(filename, "r");
-    if (!fp) return FALSE;
+    if (!fp)
+        return FALSE;
+
+    char *line = malloc(HOST_MAXLEN + 1);
+    if (!line) {
+        fclose(fp);
+        return FALSE;
+    }
 
     while ((read = getline(&line, &linelen, fp)) != -1) {
         /* works with both \n and \r\n */
@@ -102,8 +109,9 @@ int blackwhitelist_check_hostname(const char *host_addr, size_t host_len) {
     char current_host[HOST_MAXLEN + 1];
     char *tokenized_host = NULL;
 
-    if (host_len > HOST_MAXLEN) return FALSE;
-    if (host_addr && host_len) {
+    if (!host_addr || host_len == 0 || host_len > HOST_MAXLEN)
+        return FALSE;
+    {
         memcpy(current_host, host_addr, host_len);
         current_host[host_len] = '\0';
     }
