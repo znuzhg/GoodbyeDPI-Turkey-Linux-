@@ -102,7 +102,7 @@ inline static void fill_data_from_key(uint8_t *is_ipv6, uint32_t *srcip, uint16_
 /**
  * Construct a connection tracking key from connection parameters
  */
-inline static void construct_key(const uint32_t srcip[4], const uint16_t srcport,
+inline static void construct_key(const uint32_t *srcip, const uint16_t srcport,
                                  char *key, const uint8_t is_ipv6)
 {
     debug("Construct key enter\n");
@@ -156,7 +156,7 @@ static int check_get_udp_conntrack_key(const char *key, udp_connrecord_t **connr
 /**
  * Add a new DNS connection to the tracking table
  */
-static int add_udp_conntrack(const uint32_t srcip[4], const uint16_t srcport,
+static int add_udp_conntrack(const uint32_t *srcip, const uint16_t srcport,
                              const uint32_t *dstip, const uint16_t dstport,
                              const uint8_t is_ipv6
                             )
@@ -241,8 +241,8 @@ int dns_is_dns_packet(const char *packet_data, const UINT packet_dataLen, const 
  * Handle outgoing DNS requests
  * Tracks them for later correlation with responses
  */
-int dns_handle_outgoing(const uint32_t srcip[4], const uint16_t srcport,
-                        const uint32_t dstip[4], const uint16_t dstport,
+int dns_handle_outgoing(const uint32_t *srcip, const uint16_t srcport,
+                        const uint32_t *dstip, const uint16_t dstport,
                         const char *packet_data, const UINT packet_dataLen,
                         const uint8_t is_ipv6)
 {
@@ -264,7 +264,7 @@ int dns_handle_outgoing(const uint32_t srcip[4], const uint16_t srcport,
  * Handle incoming DNS responses
  * Correlates them with tracked requests and provides redirection info
  */
-int dns_handle_incoming(const uint32_t srcip[4], const uint16_t srcport,
+int dns_handle_incoming(const uint32_t *srcip, const uint16_t srcport,
                         const char *packet_data, const UINT packet_dataLen,
                         conntrack_info_t *conn_info, const uint8_t is_ipv6)
 {
