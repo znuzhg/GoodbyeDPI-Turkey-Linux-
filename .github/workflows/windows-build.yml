@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   windows-x64:
-    name: Build Windows x64 backend (MinGW-w64)
+    name: Build Windows x64 backend (UCRT64 native + MinGW-w64 cross build)
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
