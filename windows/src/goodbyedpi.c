@@ -1428,7 +1428,7 @@ int main(int argc, char *argv[]) {
                     }
                     else if (do_fragment_https && ppTcpHdr->DstPort != htons(80)) {
                         if (do_fragment_by_sni && sni_ok) {
-                            current_fragment_size = (unsigned int)(host_addr - packet_data);
+                            current_fragment_size = (unsigned int)(host_addr - (char *)packet_data);
                         } else {
                             current_fragment_size = https_fragment_size;
                         }
