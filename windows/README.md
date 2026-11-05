@@ -77,7 +77,8 @@ Do not move or rename the installation directory after the service is registered
 
 - WinDivert archive: `https://github.com/basil00/WinDivert/releases/download/v2.2.2/WinDivert-2.2.2-A.zip`
 - WinDivert SHA-256: `63cb41763bb4b20f600b6de04e991a9c2be73279e317d4d82f237b150c5f3f15`
-- MSYS2 stable release metadata: `https://api.github.com/repos/msys2/msys2-installer/releases/latest`
+- MSYS2 stable installer: `https://github.com/msys2/msys2-installer/releases/download/2026-09-27/msys2-x86_64-20260927.exe`
+- MSYS2 installer SHA-256: `416d506c839a2da4bc184eeec8cbaaf1055ee698618228c62dfc4232a6970f0e`
 
 WinDivert DLL and SYS files are downloaded during build and are not committed to this repository. Keep the DLL and driver in the same runtime directory as `goodbyedpi.exe`.
 
