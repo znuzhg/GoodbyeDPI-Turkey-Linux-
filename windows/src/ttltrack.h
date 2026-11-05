@@ -7,9 +7,9 @@
 typedef struct tcp_conntrack_info {
     uint8_t  is_ipv6;      // Flag indicating if IPv6 (1) or IPv4 (0)
     uint8_t  ttl;          // Time-to-live value of the connection
-    uint32_t srcip[4];     // Source IP address (supports both IPv4 and IPv6)
+    uint32_t *srcip;     // Source IP address (supports both IPv4 and IPv6)
     uint16_t srcport;      // Source port
-    uint32_t dstip[4];     // Destination IP address (supports both IPv4 and IPv6)
+    uint32_t *dstip;     // Destination IP address (supports both IPv4 and IPv6)
     uint16_t dstport;      // Destination port
 } tcp_conntrack_info_t;
 
@@ -19,7 +19,7 @@ int tcp_handle_incoming(const uint32_t *srcip, const uint32_t *dstip,
                         uint8_t is_ipv6, uint8_t ttl);
 
 // Process outgoing TCP packets and match with stored connections
-int tcp_handle_outgoing(uint32_t srcip[4], uint32_t dstip[4],
+int tcp_handle_outgoing(uint32_t *srcip, uint32_t *dstip,
                         uint16_t srcport, uint16_t dstport,
                         tcp_conntrack_info_t *conn_info,
                         uint8_t is_ipv6);
