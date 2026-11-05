@@ -22,6 +22,21 @@ From the repository root, run in PowerShell:
 
 The script expects the MinGW-w64 compiler tools and GNU Make to be installed. It does not install a kernel driver or register a Windows service.
 
+## Use a prebuilt Windows package
+
+1. Open the repository's [Actions page](https://github.com/znuzhg/GoodbyeDPI-Turkey-Linux-/actions/workflows/windows-build.yml).
+2. Open the latest successful **Windows x64 build** run and download the `GoodbyeDPI-Turkey-Windows-x64` artifact.
+3. Extract the ZIP. The extracted folder contains `run.cmd`, the service scripts, and a `bin` folder containing `goodbyedpi.exe` plus the WinDivert runtime files.
+4. Open PowerShell in that extracted folder **as Administrator** and run:
+
+```powershell
+.\\run.cmd
+```
+
+Start with the one-time console mode. Stop it with Ctrl+C. Do not install the auto-start service until the one-time run has been checked on your connection.
+
+To install the service later, run `.\install_service.cmd` from the same elevated PowerShell window. To remove it, run `.\remove_service.cmd`.
+
 ## Run once
 
 Open an elevated terminal (Run as administrator), then run:
@@ -53,4 +68,4 @@ The imported Windows source is distributed under Apache License 2.0. Its license
 
 ## Verification status
 
-GitHub Actions performs a reproducible x64 compile and packages the executable, WinDivert DLL/SYS runtime files, and launch scripts. Packet-handling behavior must still be validated on Windows 10/11 with a real network and packet capture before describing the port as production-ready.
+GitHub Actions performs a reproducible x64 cross-compile and packages `run.cmd`, service scripts, and a `bin/` directory containing the executable and WinDivert DLL/SYS runtime files. Packet-handling behavior must still be validated on Windows 10/11 with a real network and packet capture before describing the port as production-ready.

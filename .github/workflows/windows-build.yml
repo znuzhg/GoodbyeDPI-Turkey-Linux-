@@ -54,13 +54,15 @@ jobs:
       - name: Package executable and runtime
         run: |
           set -euo pipefail
-          mkdir -p dist/GoodbyeDPI-Turkey-Windows-x64
-          cp windows/src/goodbyedpi.exe dist/GoodbyeDPI-Turkey-Windows-x64/
+          PACKAGE=dist/GoodbyeDPI-Turkey-Windows-x64
+          mkdir -p "$PACKAGE/bin"
+          cp windows/src/goodbyedpi.exe "$PACKAGE/bin/"
           find windows/deps/WinDivert-2.2.2-A/x64 -maxdepth 1 -type f \
             \( -iname '*.dll' -o -iname '*.sys' \) \
-            -exec cp {} dist/GoodbyeDPI-Turkey-Windows-x64/ \;
-          test -n "$(find dist/GoodbyeDPI-Turkey-Windows-x64 -maxdepth 1 -iname '*.dll' -print -quit)"
-          test -n "$(find dist/GoodbyeDPI-Turkey-Windows-x64 -maxdepth 1 -iname '*.sys' -print -quit)"
+            -exec cp {} "$PACKAGE/bin/" \;
+          test -s "$PACKAGE/bin/goodbyedpi.exe"
+          test -n "$(find "$PACKAGE/bin" -maxdepth 1 -iname '*.dll' -print -quit)"
+          test -n "$(find "$PACKAGE/bin" -maxdepth 1 -iname '*.sys' -print -quit)"
           cp windows/run.cmd windows/install_service.cmd windows/remove_service.cmd \
              windows/README.md dist/GoodbyeDPI-Turkey-Windows-x64/
           cd dist
