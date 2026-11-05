@@ -452,7 +452,7 @@ int fake_load_from_sni(const char *domain_name) {
     memcpy(&packet[part0_size + sni_head_size + name_size], fake_clienthello_part1, part1_size);
     // replace placeholders with random generated values
     unsigned int random = 0;
-    for (int i = 0; i < packet_size; i++) {
+    for (size_t i = 0; i < packet_size; i++) {
         if (packet[i] == 0xAA) {
             if (rand_s(&random)) {
                 free(packet);
