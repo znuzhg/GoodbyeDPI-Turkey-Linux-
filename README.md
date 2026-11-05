@@ -27,6 +27,8 @@ Kaynak kod ZIP'ini indirdiysen de Windows backend'ini elle derlemek zorunda değ
 
 İlk denemede otomatik servisi kurma. Önce normal çalıştırmanın bağlantında doğru davrandığını kontrol et. Otomatik başlatma istersen daha sonra `.\install_service.cmd`; kaldırmak için `.\remove_service.cmd` çalıştır. WinDivert DLL/SYS dosyaları derleme sırasında resmî kaynaktan SHA-256 doğrulamasıyla indirilir; ikili sürücü dosyaları Git deposuna eklenmez.
 
+> **Güvenlik notu:** Windows sürümü, ağ paketlerini yakalayan ve değiştiren WinDivert çekirdek sürücüsünü kullanır. Microsoft Defender/antivirüs uyarı verirse korumayı kapatma, dosyayı karantinadan geri yükleme veya klasörü istisnaya ekleme. 5 Kasım 2026 tarihinde [WinDivert'in resmî 2.2.2-A arşivi hakkında açık bir Defender tespit raporu](https://github.com/basil00/WinDivert/issues/411) bulunuyordu; raporda tespitin yanlış pozitif olduğu henüz doğrulanmamıştı. Ayrıntılar için [Windows güvenlik notlarına](windows/README.md#security-and-antivirus-notes) bakın.
+
 
 
 ---
