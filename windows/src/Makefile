@@ -9,6 +9,7 @@ WINDIVERTHEADERS ?= $(WINDIVERT_DIR)/include
 WINDIVERTLIBS ?= $(WINDIVERT_DIR)/x64
 
 TARGET = goodbyedpi.exe
+BIT64 ?= 1
 LIBS = -L$(WINDIVERTLIBS) -lWinDivert -lws2_32 -l:libssp.a
 CC = $(CPREFIX)gcc
 
