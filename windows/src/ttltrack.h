@@ -19,7 +19,7 @@ int tcp_handle_incoming(const uint32_t *srcip, const uint32_t *dstip,
                         uint8_t is_ipv6, uint8_t ttl);
 
 // Process outgoing TCP packets and match with stored connections
-int tcp_handle_outgoing(uint32_t *srcip, uint32_t *dstip,
+int tcp_handle_outgoing(const uint32_t *srcip, const uint32_t *dstip,
                         uint16_t srcport, uint16_t dstport,
                         tcp_conntrack_info_t *conn_info,
                         uint8_t is_ipv6);
