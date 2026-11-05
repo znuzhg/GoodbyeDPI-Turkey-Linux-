@@ -26,13 +26,44 @@ if not exist "%EXE%" (
   exit /b 1
 )
 
-sc.exe stop GoodbyeDPI >nul 2>&1
-sc.exe delete GoodbyeDPI >nul 2>&1
-sc.exe create GoodbyeDPI binPath= "\"%EXE%\" -5 --set-ttl 5 --dns-addr 77.88.8.8 --dns-port 1253 --dnsv6-addr 2a02:6b8::feed:0ff --dnsv6-port 1253" start= auto
+set "SERVICE_ARGS=-5 --set-ttl 5 --dns-addr 77.88.8.8 --dns-port 1253 --dnsv6-addr 2a02:6b8::feed:0ff --dnsv6-port 1253"
+set "SERVICE_BINPATH=\"%EXE%\" %SERVICE_ARGS%"
+
+sc.exe query GoodbyeDPI >nul 2>&1
 if errorlevel 1 (
-  echo Failed to register the GoodbyeDPI service.
+  echo Creating GoodbyeDPI service...
+  sc.exe create GoodbyeDPI binPath= "%SERVICE_BINPATH%" start= auto
+  if errorlevel 1 (
+    echo Failed to register the GoodbyeDPI service.
+    exit /b 1
+  )
+) else (
+  sc.exe qc GoodbyeDPI | findstr.exe /I /C:"%EXE%" >nul
+  if errorlevel 1 (
+    echo A GoodbyeDPI service already exists but points to a different executable.
+    echo Refusing to stop, replace, or delete another installation.
+    echo Remove that installation using its own remove_service.cmd first.
+    exit /b 1
+  )
+
+  echo Updating the existing GoodbyeDPI service at this installation path...
+  sc.exe stop GoodbyeDPI >nul 2>&1
+  for /L %%I in (1,1,15) do (
+    sc.exe query GoodbyeDPI | findstr.exe /I "STOPPED" >nul
+    if not errorlevel 1 goto service_stopped
+    timeout /t 1 /nobreak >nul
+  )
+  echo GoodbyeDPI service did not stop within 15 seconds.
   exit /b 1
+
+  :service_stopped
+  sc.exe config GoodbyeDPI binPath= "%SERVICE_BINPATH%" start= auto
+  if errorlevel 1 (
+    echo Failed to update the existing GoodbyeDPI service configuration.
+    exit /b 1
+  )
 )
+
 sc.exe description GoodbyeDPI "GoodbyeDPI Turkey Windows packet processing service"
 sc.exe start GoodbyeDPI
 if errorlevel 1 (
@@ -40,3 +71,4 @@ if errorlevel 1 (
   exit /b 1
 )
 echo GoodbyeDPI service installed and started.
+echo Do not move this folder while the service is installed.
