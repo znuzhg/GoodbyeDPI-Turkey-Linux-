@@ -1465,8 +1465,8 @@ int main(int argc, char *argv[]) {
                                         ppTcpHdr->SrcPort, ppTcpHdr->DstPort,
                                         0, ppIpHdr->TTL))
                             ||
-                            (packet_v6 && tcp_handle_incoming((uint32_t*)&ppIpV6Hdr->SrcAddr,
-                                        (uint32_t*)&ppIpV6Hdr->DstAddr,
+                            (packet_v6 && tcp_handle_incoming(ppIpV6Hdr->SrcAddr,
+                                        ppIpV6Hdr->DstAddr,
                                         ppTcpHdr->SrcPort, ppTcpHdr->DstPort,
                                         1, ppIpV6Hdr->HopLimit))))
                         {
@@ -1538,7 +1538,7 @@ int main(int argc, char *argv[]) {
                             ppUdpHdr->DstPort = dnsv4_port;
                         }
                         else if (packet_v6) {
-                            ipv6_copy_addr(ppIpV6Hdr->DstAddr, (uint32_t*)dnsv6_addr.s6_addr);
+                            ipv6_copy_addr(ppIpV6Hdr->DstAddr, dnsv6_addr.s6_addr);
                             ppUdpHdr->DstPort = dnsv6_port;
                         }
                         should_recalc_checksum = 1;
