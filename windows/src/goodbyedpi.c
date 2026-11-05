@@ -328,7 +328,7 @@ static HANDLE init(char *filter, UINT64 flags) {
                   FORMAT_MESSAGE_IGNORE_INSERTS,
                   NULL, errorcode, MAKELANGID(LANG_ENGLISH, SUBLANG_DEFAULT),
                   (LPTSTR)&errormessage, 0, NULL);
-    printf("Error opening filter: %d %s\n", errorcode, errormessage);
+    printf("Error opening filter: %lu %s\n", (unsigned long)errorcode, errormessage);
     LocalFree(errormessage);
     if (errorcode == 2)
         printf("The driver files WinDivert32.sys or WinDivert64.sys were not found.\n");
@@ -1081,7 +1081,7 @@ int main(int argc, char *argv[]) {
            "Fragment HTTP: %u\n"                    /* 2 */
            "Fragment persistent HTTP: %u\n"         /* 3 */
            "Fragment HTTPS: %u\n"                   /* 4 */
-           "Fragment by SNI: %u\n"                  /* 5 */
+           "Fragment by SNI: %d\n"                  /* 5 */
            "Native fragmentation (splitting): %d\n" /* 6 */
            "Fragments sending in reverse: %d\n"     /* 7 */
            "hoSt: %d\n"                             /* 8 */
@@ -1428,7 +1428,7 @@ int main(int argc, char *argv[]) {
                     }
                     else if (do_fragment_https && ppTcpHdr->DstPort != htons(80)) {
                         if (do_fragment_by_sni && sni_ok) {
-                            current_fragment_size = (void*)host_addr - packet_data;
+                            current_fragment_size = (unsigned int)(host_addr - packet_data);
                         } else {
                             current_fragment_size = https_fragment_size;
                         }
