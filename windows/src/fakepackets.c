@@ -321,17 +321,28 @@ int send_fake_https_request(const HANDLE w_filter,
 }
 
 static int fake_add(const unsigned char *data, size_t size) {
-    struct fake_t *fake = malloc(sizeof(struct fake_t));
+    const size_t capacity = sizeof(fakes) / sizeof(*fakes);
+    struct fake_t *fake;
+
+    if (!data || size == 0 || fakes_count >= (int)capacity)
+        return 3;
+
+    fake = malloc(sizeof(*fake));
+    if (!fake)
+        return 4;
+
     fake->size = size;
     fake->data = data;
 
-    for (size_t k = 0; k <= sizeof(fakes) / sizeof(*fakes); k++) {
+    for (size_t k = 0; k < capacity; k++) {
         if (!fakes[k]) {
             fakes[k] = fake;
             fakes_count++;
             return 0;
         }
     }
+
+    free(fake);
     return 3;
 }
 
@@ -340,7 +351,9 @@ int fake_load_from_hex(const char *data) {
     if (len < 2 || len % 2 || len > (1420 * 2))
         return 1;
 
-    unsigned char *finaldata = calloc((len + 2) / 2, 1);
+    unsigned char *finaldata = calloc(len / 2, 1);
+    if (!finaldata)
+        return 3;
 
     for (size_t i = 0; i<len - 1; i+=2) {
         char num1 = data[i];
@@ -356,8 +369,10 @@ int fake_load_from_hex(const char *data) {
                 curchar -= 'a' - 0xA;
             else if (curchar >= 'A' && curchar <= 'F')
                 curchar -= 'A' - 0xA;
-            else
+            else {
+                free(finaldata);
                 return 2; // incorrect character, not a hex data
+            }
 
             if (!j) {
                 num1 = curchar;
@@ -372,11 +387,14 @@ int fake_load_from_hex(const char *data) {
         finaldata[i/2] = finalchar;
     }
 
-    return fake_add(finaldata, len / 2);
+    int ret = fake_add(finaldata, len / 2);
+    if (ret)
+        free(finaldata);
+    return ret;
 }
 
 int fake_load_random(unsigned int count, unsigned int maxsize) {
-    if (count < 1 || count > sizeof(fakes) / sizeof(*fakes))
+    if (count < 1 || count > sizeof(fakes) / sizeof(*fakes) || maxsize == 0)
         return 1;
 
     unsigned int random = 0;
@@ -388,12 +406,20 @@ int fake_load_random(unsigned int count, unsigned int maxsize) {
         len = 8 + (len % maxsize);
 
         unsigned char *data = calloc(len, 1);
+        if (!data)
+            return 1;
+
         for (unsigned int j=0; j<len; j++) {
-            rand_s(&random);
+            if (rand_s(&random)) {
+                free(data);
+                return 1;
+            }
             data[j] = random % 0xFF;
         }
-        if (fake_add(data, len))
+        if (fake_add(data, len)) {
+            free(data);
             return 2;
+        }
     }
     return 0;
 }
@@ -408,13 +434,19 @@ int fake_load_from_sni(const char *domain_name) {
         return 1; // just extra safeguard against NPE
     }
     // calculate sizes
-    const int name_size = strlen(domain_name);
-    const int part0_size = sizeof(fake_clienthello_part0);
-    const int part1_size = sizeof(fake_clienthello_part1);
-    const int sni_head_size = 9;
-    const int packet_size = part0_size + part1_size + sni_head_size + name_size;
+    const size_t name_size = strlen(domain_name);
+    if (name_size == 0 || name_size > HOST_MAXLEN)
+        return 1;
+
+    const size_t part0_size = sizeof(fake_clienthello_part0);
+    const size_t part1_size = sizeof(fake_clienthello_part1);
+    const size_t sni_head_size = 9;
+    const size_t packet_size = part0_size + part1_size + sni_head_size + name_size;
     // allocate memory
     unsigned char *packet = malloc(packet_size);
+    if (!packet)
+        return 1;
+
     // copy major parts of packet
     memcpy(packet, fake_clienthello_part0, part0_size);
     memcpy(&packet[part0_size + sni_head_size + name_size], fake_clienthello_part1, part1_size);
@@ -422,7 +454,10 @@ int fake_load_from_sni(const char *domain_name) {
     unsigned int random = 0;
     for (int i = 0; i < packet_size; i++) {
         if (packet[i] == 0xAA) {
-            rand_s(&random);
+            if (rand_s(&random)) {
+                free(packet);
+                return 1;
+            }
             packet[i] = random & 0xFF;
         }
     }
@@ -438,5 +473,8 @@ int fake_load_from_sni(const char *domain_name) {
     set_uint16be(packet, part0_size + 7, name_size);
     memcpy(&packet[part0_size + sni_head_size], domain_name, name_size);
     // add packet to fakes
-    return fake_add(packet, packet_size);
+    int ret = fake_add(packet, packet_size);
+    if (ret)
+        free(packet);
+    return ret;
 }
