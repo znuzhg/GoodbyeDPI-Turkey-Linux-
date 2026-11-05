@@ -116,7 +116,7 @@ $stagingCandidates += 'C:\gdpibuild'
 
 $stagingRoot = $null
 foreach ($candidate in $stagingCandidates) {
-    if (Test-AsciiNoSpacePath -Path $candidate -and
+    if ((Test-AsciiNoSpacePath -Path $candidate) -and
         (Test-WritableDirectory -Path $candidate)) {
         $stagingRoot = $candidate
         break
