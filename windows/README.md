@@ -16,7 +16,7 @@ This directory contains the native Windows backend for this repository. It uses 
 
 The build script detects the active PowerShell edition/version and supports both Windows PowerShell 5.1 (`powershell.exe`) and PowerShell 7+ (`pwsh.exe`).
 
-When MSYS2 is not already installed, the script resolves the latest dated stable x64 installer release from the official `msys2/msys2-installer` GitHub repository. It verifies the downloaded installer against the SHA-256 digest published in GitHub release metadata and requires a valid Windows Authenticode signature before running it. It installs MSYS2 in a user-writable location when possible, performs the documented full package update, and installs GNU Make plus the UCRT64 MinGW-w64 GCC toolchain. No separate `pacman` command or manual PATH edit is required.
+When MSYS2 is not already installed, the script uses the official stable x64 installer from the `msys2/msys2-installer` release dated `2026-09-27`. It verifies the pinned SHA-256 value and requires a valid Windows Authenticode signature before running it. It installs MSYS2 in a user-writable location when possible, performs the documented full package update, and installs GNU Make plus the UCRT64 MinGW-w64 GCC toolchain. No separate `pacman` command or manual PATH edit is required. The installer release and digest are pinned for reproducibility and should be updated together when adopting a newer stable MSYS2 release.
 
 The native build uses MSYS2's UCRT64 environment (the recommended current 64-bit GCC environment); the CI cross-build remains a separate MinGW-w64 toolchain. The MSYS2 install location can be overridden with the `MSYS2_ROOT` environment variable. This is mainly useful for isolated installations and CI validation.
 
