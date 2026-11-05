@@ -41,7 +41,7 @@ To remove the service, run `windows\remove_service.cmd` as administrator. The re
 ## Build dependency
 
 - Archive: `https://github.com/basil00/WinDivert/releases/download/v2.2.2/WinDivert-2.2.2-A.zip`
-- SHA-256: `To be pinned from the official GitHub release archive after CI verifies the downloaded package.`
+- SHA-256: `63cb41763bb4b20f600b6de04e991a9c2be73279e317d4d82f237b150c5f3f15`
 
 WinDivert DLL and SYS files are downloaded during build and are not committed to this repository. Keep the DLL and driver in the same runtime directory as `goodbyedpi.exe`.
 

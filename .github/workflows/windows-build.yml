@@ -36,8 +36,7 @@ jobs:
           curl --fail --location --retry 3 \
             https://github.com/basil00/WinDivert/releases/download/v2.2.2/WinDivert-2.2.2-A.zip \
             --output WinDivert-2.2.2-A.zip
-          sha256sum WinDivert-2.2.2-A.zip | tee WinDivert-2.2.2-A.sha256
-          echo "WinDivert archive downloaded from the official GitHub release; pin this digest in the follow-up hardening change."
+          echo "63cb41763bb4b20f600b6de04e991a9c2be73279e317d4d82f237b150c5f3f15  WinDivert-2.2.2-A.zip" | sha256sum --check
           mkdir -p deps
           unzip -q WinDivert-2.2.2-A.zip -d deps
 

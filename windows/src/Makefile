@@ -31,7 +31,7 @@ LDFLAGS = -fstack-protector -Wl,-O1,-pie,--dynamicbase,--nxcompat,--sort-common,
 ifdef BIT64
 	LDFLAGS += -Wl,--high-entropy-va -Wl,--pic-executable,-e,mainCRTStartup
 else
-	$(error This repository currently builds Windows x64 only. Use BIT64=1.)
+$(error This repository currently builds Windows x64 only. Use BIT64=1.)
 endif
 
 .PHONY: all clean

@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $version = 'WinDivert-2.2.2-A'
-$sha256 = '__PINNED_SHA256_TO_BE_SET_AFTER_CI_DOWNLOAD__'
+$sha256 = '63cb41763bb4b20f600b6de04e991a9c2be73279e317d4d82f237b150c5f3f15'
 $url = 'https://github.com/basil00/WinDivert/releases/download/v2.2.2/WinDivert-2.2.2-A.zip'
 
 $windowsDir = $PSScriptRoot
