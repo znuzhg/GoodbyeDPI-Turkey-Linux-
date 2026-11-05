@@ -75,3 +75,32 @@ jobs:
           path: dist/GoodbyeDPI-Turkey-Windows-x64.zip
           if-no-files-found: error
           retention-days: 14
+
+  powershell-native-build:
+    name: Native build with Windows PowerShell 5.1 and PowerShell 7
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Build with Windows PowerShell 5.1
+        shell: powershell
+        run: .\windows\build.ps1
+
+      - name: Verify Windows PowerShell 5.1 output
+        shell: powershell
+        run: |
+          if (-not (Test-Path .\windows\bin\goodbyedpi.exe)) {
+            throw 'Windows PowerShell 5.1 build did not produce goodbyedpi.exe.'
+          }
+
+      - name: Build with PowerShell 7
+        shell: pwsh
+        run: .\windows\build.ps1
+
+      - name: Verify PowerShell 7 output
+        shell: pwsh
+        run: |
+          if (-not (Test-Path .\windows\bin\goodbyedpi.exe)) {
+            throw 'PowerShell 7 build did not produce goodbyedpi.exe.'
+          }
