@@ -95,7 +95,10 @@ int blackwhitelist_load_list(const char *filename) {
             cnt++;
     }
     free(line);
-    if (!blackwhitelist) return FALSE;
+    if (!blackwhitelist) {
+        fclose(fp);
+        return FALSE;
+    }
     printf("Loaded %d hosts from file %s\n", cnt, filename);
     fclose(fp);
     return TRUE;
@@ -111,10 +114,8 @@ int blackwhitelist_check_hostname(const char *host_addr, size_t host_len) {
 
     if (!host_addr || host_len == 0 || host_len > HOST_MAXLEN)
         return FALSE;
-    {
-        memcpy(current_host, host_addr, host_len);
-        current_host[host_len] = '\0';
-    }
+    memcpy(current_host, host_addr, host_len);
+    current_host[host_len] = '\0';
 
     if (check_get_hostname(current_host))
             return TRUE;
