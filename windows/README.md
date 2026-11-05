@@ -5,22 +5,50 @@ This directory contains the native Windows backend for this repository. It uses 
 ## Scope and status
 
 - Target: Windows 10/11, x64.
+- Supported build shells: Windows PowerShell 5.1 and PowerShell 7+.
 - Backend: WinDivert 2.2.2-A.
 - The Linux backend remains under the repository's existing `src/` directory and is not modified by this port.
 - The Windows source is kept under `windows/src/`; it is not yet a shared cross-platform C core.
-- CI builds the Windows executable and packages its runtime driver files. A successful compile is not a substitute for real network testing on Windows.
+- CI verifies the Windows x64 cross-compile. The native build script also checks both Windows PowerShell 5.1 and PowerShell 7 in CI.
+- A successful compile is not a substitute for real network testing on Windows.
 
-## Build on Windows
+## Build on Windows (automatic setup)
 
-Use an MSYS2 **MINGW64** environment with GCC, GNU Make, windres, curl and unzip available on PATH. The build script downloads the pinned WinDivert SDK/runtime archive, verifies its SHA-256, builds the x64 executable and stages the required runtime files under `windows/bin/`.
+The build script detects the active PowerShell edition/version and supports both Windows PowerShell 5.1 (`powershell.exe`) and PowerShell 7+ (`pwsh.exe`).
 
-From the repository root, run in PowerShell:
+When MSYS2 is not already installed, the script downloads the official x64 MSYS2 installer from the `msys2/msys2-installer` GitHub release, verifies the installer against the SHA-256 digest published in GitHub release metadata, and installs it in a user-writable location when possible. It then updates MSYS2 and installs GNU Make plus MinGW-w64 GCC. No separate `pacman` command or manual PATH edit is required.
+
+The script also downloads the pinned WinDivert archive and verifies its SHA-256 before extraction. To avoid MSYS2 path issues with Turkish characters or spaces in the repository path (for example `Masaüstü`), source files and dependencies are staged in an ASCII-only temporary build directory. The resulting executable and WinDivert runtime files are copied back to `windows/bin/`.
+
+From the repository root, run either command:
 
 ```powershell
-.\windows\build.ps1
+# Windows PowerShell 5.1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\windows\build.ps1
+
+# PowerShell 7+
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File .\windows\build.ps1
 ```
 
-The script expects the MinGW-w64 compiler tools and GNU Make to be installed. It does not install a kernel driver or register a Windows service.
+Or open a terminal in this directory and run:
+
+```powershell
+.\build.ps1
+```
+
+The build itself does not require an elevated terminal. Internet access is required for the first-time MSYS2/toolchain and WinDivert downloads. The MSYS2 installer and packages are installed under the current user or another writable ASCII-only location. The script does not install a kernel driver or register a Windows service.
+
+## Run from source
+
+`run.cmd` automatically invokes `build.ps1` when `bin/goodbyedpi.exe` is missing. It prefers PowerShell 7 when `pwsh.exe` is installed and otherwise uses Windows PowerShell 5.1.
+
+Open a terminal in the `windows` folder and run `run.cmd` as Administrator:
+
+```powershell
+.\run.cmd
+```
+
+Stop the process with Ctrl+C. First test the one-time console mode. The default launcher redirects DNS to Yandex (`77.88.8.8:1253`) and IPv6 DNS to `2a02:6b8::feed:0ff:1253`.
 
 ## Use a prebuilt Windows package
 
@@ -33,30 +61,21 @@ The script expects the MinGW-w64 compiler tools and GNU Make to be installed. It
 .\run.cmd
 ```
 
-Start with the one-time console mode. Stop it with Ctrl+C. Do not install the auto-start service until the one-time run has been checked on your connection.
-
-To install the service later, run `.\install_service.cmd` from the same elevated PowerShell window. To remove it, run `.\remove_service.cmd`.
-
-## Run once
-
-Open an elevated terminal (Run as administrator), then run:
-
-```cmd
-windows\run.cmd
-```
-
-Stop the process with Ctrl+C. The bundled executable manifest also requests administrator privileges.
+The prebuilt package does not need MSYS2 or a compiler.
 
 ## Install as a Windows service
 
-Run `windows\install_service.cmd` as administrator. It registers the `GoodbyeDPI` service for automatic startup and starts it immediately.
+Run `install_service.cmd` as Administrator. If the executable is missing, this script also attempts the automatic build before registering the service. It registers the `GoodbyeDPI` service for automatic startup and starts it immediately.
 
-To remove the service, run `windows\remove_service.cmd` as administrator. The removal script only removes this application's service entry; it does not delete shared WinDivert driver services from the machine.
+To remove it, run `remove_service.cmd` as administrator. The removal script only removes this application's service entry; it does not delete shared WinDivert driver services from the machine.
+
+Do not move or rename the installation directory after the service is registered because the service stores the executable path.
 
 ## Build dependency
 
-- Archive: `https://github.com/basil00/WinDivert/releases/download/v2.2.2/WinDivert-2.2.2-A.zip`
-- SHA-256: `63cb41763bb4b20f600b6de04e991a9c2be73279e317d4d82f237b150c5f3f15`
+- WinDivert archive: `https://github.com/basil00/WinDivert/releases/download/v2.2.2/WinDivert-2.2.2-A.zip`
+- WinDivert SHA-256: `63cb41763bb4b20f600b6de04e991a9c2be73279e317d4d82f237b150c5f3f15`
+- MSYS2 installer metadata: `https://api.github.com/repos/msys2/msys2-installer/releases/tags/nightly-x86_64`
 
 WinDivert DLL and SYS files are downloaded during build and are not committed to this repository. Keep the DLL and driver in the same runtime directory as `goodbyedpi.exe`.
 
@@ -68,4 +87,4 @@ The imported Windows source is distributed under Apache License 2.0. Its license
 
 ## Verification status
 
-GitHub Actions performs a reproducible x64 cross-compile and packages `run.cmd`, service scripts, and a `bin/` directory containing the executable and WinDivert DLL/SYS runtime files. Packet-handling behavior must still be validated on Windows 10/11 with a real network and packet capture before describing the port as production-ready.
+GitHub Actions performs the reproducible x64 cross-compile and verifies the PowerShell build path with Windows PowerShell 5.1 and PowerShell 7+. Packet-handling behavior must still be validated on Windows 10/11 with a real network and packet capture before describing the port as production-ready.
