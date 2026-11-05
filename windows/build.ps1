@@ -297,9 +297,21 @@ if (-not (Test-Path -LiteralPath $builtExe)) {
 
 $runtimeFiles = Get-ChildItem -LiteralPath $runtimeDir -File |
     Where-Object { $_.Extension -in '.dll', '.sys' }
+$driverFiles = @($runtimeFiles | Where-Object { $_.Extension -eq '.sys' })
 if (-not ($runtimeFiles | Where-Object { $_.Extension -eq '.dll' }) -or
-    -not ($runtimeFiles | Where-Object { $_.Extension -eq '.sys' })) {
+    $driverFiles.Count -eq 0) {
     throw 'The pinned WinDivert archive did not contain the expected x64 DLL and SYS runtime files.'
+}
+
+# Verify the Windows kernel driver signature before placing it in the runtime package.
+# Authenticode validity confirms publisher/signature integrity; it does not establish
+# that an antivirus product will classify the file as benign.
+foreach ($driverFile in $driverFiles) {
+    $driverSignature = Get-AuthenticodeSignature -LiteralPath $driverFile.FullName
+    if ($driverSignature.Status -ne 'Valid') {
+        throw "WinDivert driver signature verification failed for $($driverFile.Name): $($driverSignature.Status). $($driverSignature.StatusMessage)"
+    }
+    Write-Host "WinDivert driver signer ($($driverFile.Name)): $($driverSignature.SignerCertificate.Subject)"
 }
 
 $binDir = Join-Path $windowsDir 'bin'
