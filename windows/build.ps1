@@ -232,15 +232,15 @@ if (-not (Test-Path -LiteralPath $bashPath)) {
 }
 
 # MSYS2's own documentation recommends running pacman from a login shell.
-$env:MSYSTEM = 'MINGW64'
+$env:MSYSTEM = 'UCRT64'
 $env:CHERE_INVOKING = 'yes'
 Write-Host "Using MSYS2: $msysRoot"
-Write-Host 'Updating MSYS2 package database and installing MINGW64 GCC + GNU Make...'
+Write-Host 'Updating MSYS2 package database and installing UCRT64 GCC + GNU Make...'
 
 Invoke-MsysBash -BashPath $bashPath -Command ' ' -FailureMessage 'MSYS2 first-run initialization failed'
 Invoke-MsysBash -BashPath $bashPath -Command 'pacman -Syu --noconfirm' -FailureMessage 'MSYS2 core update failed'
 Invoke-MsysBash -BashPath $bashPath -Command 'pacman -Syu --noconfirm' -FailureMessage 'MSYS2 package update failed'
-Invoke-MsysBash -BashPath $bashPath -Command 'pacman --noconfirm -S --needed make mingw-w64-x86_64-gcc' -FailureMessage 'Installing GNU Make and MinGW-w64 GCC failed'
+Invoke-MsysBash -BashPath $bashPath -Command 'pacman --noconfirm -S --needed make mingw-w64-ucrt-x86_64-gcc' -FailureMessage 'Installing GNU Make and MinGW-w64 GCC failed'
 Invoke-MsysBash -BashPath $bashPath -Command 'command -v make && command -v gcc && command -v windres' -FailureMessage 'GNU Make, GCC or windres is still missing'
 
 # Download and verify the pinned WinDivert SDK/runtime.
