@@ -23,6 +23,8 @@ Windows derleme, çalıştırma, servis kurma ve kaldırma adımları için [Win
 3. Çıkan klasörde yönetici olarak açılmış PowerShell penceresinden `.\run.cmd` komutunu çalıştır.
 4. Durdurmak için `Ctrl+C` kullan.
 
+Kaynak kod ZIP'ini indirdiysen de Windows backend'ini elle derlemek zorunda değilsin: `windows` klasöründeki `run.cmd`, `bin/goodbyedpi.exe` henüz yoksa PowerShell 7 veya Windows PowerShell 5.1'i otomatik seçerek `build.ps1` betiğini çalıştırır. İlk derlemede gerekli MSYS2/GCC/Make araçlarını kurar. Alternatif olarak doğrudan `windows\\build.ps1` çalıştırılabilir.
+
 İlk denemede otomatik servisi kurma. Önce normal çalıştırmanın bağlantında doğru davrandığını kontrol et. Otomatik başlatma istersen daha sonra `.\install_service.cmd`; kaldırmak için `.\remove_service.cmd` çalıştır. WinDivert DLL/SYS dosyaları derleme sırasında resmî kaynaktan SHA-256 doğrulamasıyla indirilir; ikili sürücü dosyaları Git deposuna eklenmez.
 
 
