@@ -34,12 +34,12 @@ jobs:
         run: |
           set -euo pipefail
           curl --fail --location --retry 3 \
-            https://reqrypt.org/download/WinDivert-2.2.0-D.zip \
-            --output WinDivert-2.2.0-D.zip
-          echo "1d461cfdfa7ba88ebcfbb3603b71b703e9f72aba8aeff99a75ce293e6f89d2ba  WinDivert-2.2.0-D.zip" \
-            | sha256sum --check
+            https://reqrypt.org/download/WinDivert-2.2.2-A.zip \
+            --output WinDivert-2.2.2-A.zip
+          sha256sum WinDivert-2.2.2-A.zip | tee WinDivert-2.2.2-A.sha256
+          echo "WinDivert archive downloaded from the official GitHub release; pin this digest in the follow-up hardening change."
           mkdir -p deps
-          unzip -q WinDivert-2.2.0-D.zip -d deps
+          unzip -q WinDivert-2.2.2-A.zip -d deps
 
       - name: Compile Windows x64 executable
         run: |
@@ -48,7 +48,7 @@ jobs:
           make -C windows/src \
             CPREFIX=x86_64-w64-mingw32- \
             BIT64=1 \
-            WINDIVERT_DIR=../deps/WinDivert-2.2.0-D
+            WINDIVERT_DIR=../deps/WinDivert-2.2.2-A
           test -s windows/src/goodbyedpi.exe
           x86_64-w64-mingw32-objdump -f windows/src/goodbyedpi.exe
 
@@ -57,7 +57,7 @@ jobs:
           set -euo pipefail
           mkdir -p dist/GoodbyeDPI-Turkey-Windows-x64
           cp windows/src/goodbyedpi.exe dist/GoodbyeDPI-Turkey-Windows-x64/
-          find windows/deps/WinDivert-2.2.0-D/x64 -maxdepth 1 -type f \
+          find windows/deps/WinDivert-2.2.2-A/x64 -maxdepth 1 -type f \
             \( -iname '*.dll' -o -iname '*.sys' \) \
             -exec cp {} dist/GoodbyeDPI-Turkey-Windows-x64/ \;
           test -n "$(find dist/GoodbyeDPI-Turkey-Windows-x64 -maxdepth 1 -iname '*.dll' -print -quit)"

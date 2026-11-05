@@ -2,9 +2,9 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$version = 'WinDivert-2.2.0-D'
-$sha256 = '1d461cfdfa7ba88ebcfbb3603b71b703e9f72aba8aeff99a75ce293e6f89d2ba'
-$url = 'https://reqrypt.org/download/WinDivert-2.2.0-D.zip'
+$version = 'WinDivert-2.2.2-A'
+$sha256 = '__PINNED_SHA256_TO_BE_SET_AFTER_CI_DOWNLOAD__'
+$url = 'https://reqrypt.org/download/WinDivert-2.2.2-A.zip'
 
 $windowsDir = $PSScriptRoot
 $depsDir = Join-Path $windowsDir 'deps'
@@ -22,6 +22,7 @@ if (-not (Test-Path (Join-Path $extractDir 'include\windivert.h'))) {
     }
 
     $actualHash = (Get-FileHash -Path $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+    Write-Host "Downloaded WinDivert SHA-256: $actualHash"
     if ($actualHash -ne $sha256) {
         throw "WinDivert archive SHA-256 mismatch. Expected $sha256; got $actualHash. The archive was not extracted."
     }

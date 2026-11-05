@@ -4,7 +4,7 @@ ifndef MSYSTEM
 CPREFIX ?= x86_64-w64-mingw32-
 endif
 
-WINDIVERT_DIR ?= ../deps/WinDivert-2.2.0-D
+WINDIVERT_DIR ?= ../deps/WinDivert-2.2.2-A
 WINDIVERTHEADERS ?= $(WINDIVERT_DIR)/include
 WINDIVERTLIBS ?= $(WINDIVERT_DIR)/x64
 

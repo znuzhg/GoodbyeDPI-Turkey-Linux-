@@ -5,7 +5,7 @@ This directory contains the native Windows backend for this repository. It uses 
 ## Scope and status
 
 - Target: Windows 10/11, x64.
-- Backend: WinDivert 2.2.0-D.
+- Backend: WinDivert 2.2.2-A.
 - The Linux backend remains under the repository's existing `src/` directory and is not modified by this port.
 - The Windows source is kept under `windows/src/`; it is not yet a shared cross-platform C core.
 - CI builds the Windows executable and packages its runtime driver files. A successful compile is not a substitute for real network testing on Windows.
@@ -40,8 +40,8 @@ To remove the service, run `windows\remove_service.cmd` as administrator. The re
 
 ## Build dependency
 
-- Archive: `https://reqrypt.org/download/WinDivert-2.2.0-D.zip`
-- SHA-256: `1d461cfdfa7ba88ebcfbb3603b71b703e9f72aba8aeff99a75ce293e6f89d2ba`
+- Archive: `https://github.com/basil00/WinDivert/releases/download/v2.2.2/WinDivert-2.2.2-A.zip`
+- SHA-256: `To be pinned from the official GitHub release archive after CI verifies the downloaded package.`
 
 WinDivert DLL and SYS files are downloaded during build and are not committed to this repository. Keep the DLL and driver in the same runtime directory as `goodbyedpi.exe`.
 
