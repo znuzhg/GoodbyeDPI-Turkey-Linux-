@@ -64,7 +64,11 @@ jobs:
           test -n "$(find "$PACKAGE/bin" -maxdepth 1 -iname '*.dll' -print -quit)"
           test -n "$(find "$PACKAGE/bin" -maxdepth 1 -iname '*.sys' -print -quit)"
           cp windows/run.cmd windows/install_service.cmd windows/remove_service.cmd \
-             windows/README.md dist/GoodbyeDPI-Turkey-Windows-x64/
+             windows/README.md windows/LICENSE-APACHE-2.0.txt \
+             windows/WINDIVERT-LICENSE.txt windows/THIRD-PARTY-NOTICES.md \
+             dist/GoodbyeDPI-Turkey-Windows-x64/
+          test -s "$PACKAGE/WINDIVERT-LICENSE.txt"
+          test -s "$PACKAGE/THIRD-PARTY-NOTICES.md"
           cd dist
           zip -qr GoodbyeDPI-Turkey-Windows-x64.zip GoodbyeDPI-Turkey-Windows-x64
 
@@ -103,4 +107,34 @@ jobs:
         run: |
           if (-not (Test-Path .\windows\bin\goodbyedpi.exe)) {
             throw 'PowerShell 7 build did not produce goodbyedpi.exe.'
+          }
+
+  powershell-clean-bootstrap:
+    name: Clean MSYS2 bootstrap with Windows PowerShell 5.1
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Build from a clean MSYS2 location
+        shell: powershell
+        run: |
+          $env:MSYS2_ROOT = Join-Path $env:RUNNER_TEMP 'goodbyedpi-msys2-clean'
+          if (Test-Path -LiteralPath $env:MSYS2_ROOT) {
+            Remove-Item -LiteralPath $env:MSYS2_ROOT -Recurse -Force
+          }
+          .\windows\build.ps1
+
+      - name: Verify clean bootstrap output and runtime
+        shell: powershell
+        run: |
+          $required = @(
+            '.\windows\bin\goodbyedpi.exe',
+            '.\windows\bin\WinDivert.dll',
+            '.\windows\bin\WinDivert64.sys'
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path -LiteralPath $path)) {
+              throw "Clean bootstrap did not produce required file: $path"
+            }
           }
