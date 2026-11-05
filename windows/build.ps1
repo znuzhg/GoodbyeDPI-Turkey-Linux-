@@ -130,40 +130,48 @@ $cacheDir = Join-Path $stagingRoot 'cache'
 New-Item -ItemType Directory -Force -Path $cacheDir | Out-Null
 
 # Find an existing MSYS2 install before downloading one.
-$msysRoots = @()
-if ($env:MSYS2_ROOT) {
-    $msysRoots += $env:MSYS2_ROOT
-}
-$msysRoots += 'C:\msys64'
-if ($env:LOCALAPPDATA) {
-    $msysRoots += (Join-Path $env:LOCALAPPDATA 'msys64')
+# An explicitly supplied MSYS2_ROOT is authoritative; this also lets CI verify
+# the clean-install/bootstrap path even when its image has another MSYS2 copy.
+$requestedMsysRoot = $null
+if (-not [string]::IsNullOrWhiteSpace($env:MSYS2_ROOT)) {
+    $requestedMsysRoot = [System.IO.Path]::GetFullPath($env:MSYS2_ROOT)
 }
 
 $msysRoot = $null
-foreach ($candidate in ($msysRoots | Select-Object -Unique)) {
-    if (Test-Path -LiteralPath (Join-Path $candidate 'usr\bin\bash.exe')) {
-        $msysRoot = $candidate
-        break
+if ($requestedMsysRoot -and
+    (Test-Path -LiteralPath (Join-Path $requestedMsysRoot 'usr\bin\bash.exe'))) {
+    $msysRoot = $requestedMsysRoot
+} elseif (-not $requestedMsysRoot) {
+    $msysRoots = @('C:\msys64')
+    if ($env:LOCALAPPDATA) {
+        $msysRoots += (Join-Path $env:LOCALAPPDATA 'msys64')
+    }
+
+    foreach ($candidate in ($msysRoots | Select-Object -Unique)) {
+        if (Test-Path -LiteralPath (Join-Path $candidate 'usr\bin\bash.exe')) {
+            $msysRoot = $candidate
+            break
+        }
     }
 }
 
 if (-not $msysRoot) {
-    Write-Host 'MSYS2 was not found. Downloading the official x64 installer...'
+    Write-Host 'MSYS2 was not found. Downloading the latest stable official x64 installer...'
 
-    # Resolve the current official installer and its SHA-256 digest from the MSYS2
-    # installer project's GitHub release metadata. This avoids an unverified binary.
-    $releaseApi = 'https://api.github.com/repos/msys2/msys2-installer/releases/tags/nightly-x86_64'
+    # Use the latest dated stable release, not the nightly channel. GitHub's
+    # release metadata supplies the SHA-256 digest for the exact installer asset.
+    $releaseApi = 'https://api.github.com/repos/msys2/msys2-installer/releases/latest'
     $release = Invoke-RestMethod -Uri $releaseApi -Headers @{ 'User-Agent' = 'GoodbyeDPI-Turkey-build' } -TimeoutSec 60
     $installerAsset = $release.assets |
-        Where-Object { $_.name -eq 'msys2-x86_64-latest.exe' } |
+        Where-Object { $_.name -match '^msys2-x86_64-\d{8}\.exe$' } |
         Select-Object -First 1
 
     if (-not $installerAsset -or -not $installerAsset.browser_download_url -or
         -not $installerAsset.digest -or $installerAsset.digest -notmatch '^sha256:[0-9a-fA-F]{64}$') {
-        throw 'Could not resolve the official MSYS2 installer and its SHA-256 digest from GitHub release metadata.'
+        throw "Could not resolve a stable official MSYS2 x64 installer and SHA-256 digest from release $($release.tag_name)."
     }
 
-    $installerPath = Join-Path $cacheDir 'msys2-x86_64-latest.exe'
+    $installerPath = Join-Path $cacheDir $installerAsset.name
     Invoke-CompatDownload -Uri $installerAsset.browser_download_url -OutFile $installerPath
     $expectedInstallerHash = $installerAsset.digest.Substring(7).ToLowerInvariant()
     $actualInstallerHash = (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -173,12 +181,25 @@ if (-not $msysRoot) {
     }
     Write-Host "MSYS2 installer SHA-256 verified: $actualInstallerHash"
 
-    # Prefer a per-user location so Administrator privileges are not needed to build.
-    $installCandidates = @()
-    if ($env:LOCALAPPDATA) {
-        $installCandidates += (Join-Path $env:LOCALAPPDATA 'msys64')
+    # Stable MSYS2 installers are Authenticode-signed. Require a valid signature
+    # as a separate check; a valid signature is publisher verification, not a
+    # malware-clean verdict.
+    $installerSignature = Get-AuthenticodeSignature -LiteralPath $installerPath
+    if ($installerSignature.Status -ne 'Valid') {
+        throw "MSYS2 installer Authenticode verification failed: $($installerSignature.Status). $($installerSignature.StatusMessage)"
     }
-    $installCandidates += 'C:\msys64'
+    Write-Host "MSYS2 signer: $($installerSignature.SignerCertificate.Subject)"
+
+    # Prefer a per-user install. An explicit MSYS2_ROOT overrides the default locations.
+    $installCandidates = @()
+    if ($requestedMsysRoot) {
+        $installCandidates += $requestedMsysRoot
+    } else {
+        if ($env:LOCALAPPDATA) {
+            $installCandidates += (Join-Path $env:LOCALAPPDATA 'msys64')
+        }
+        $installCandidates += 'C:\msys64'
+    }
 
     $installRoot = $null
     foreach ($candidate in ($installCandidates | Select-Object -Unique)) {
@@ -189,7 +210,7 @@ if (-not $msysRoot) {
         }
     }
     if (-not $installRoot) {
-        throw 'No writable ASCII-only MSYS2 install path was found. Create an empty C:\msys64 folder or set MSYS2_ROOT to an existing installation.'
+        throw 'No writable empty ASCII-only MSYS2 install path was found. Remove an incomplete prior installation or set MSYS2_ROOT to a new empty directory.'
     }
 
     $installerRootArgument = $installRoot.Replace('\', '/')
@@ -217,8 +238,8 @@ Write-Host "Using MSYS2: $msysRoot"
 Write-Host 'Updating MSYS2 package database and installing MINGW64 GCC + GNU Make...'
 
 Invoke-MsysBash -BashPath $bashPath -Command ' ' -FailureMessage 'MSYS2 first-run initialization failed'
-Invoke-MsysBash -BashPath $bashPath -Command 'pacman --noconfirm -Syuu' -FailureMessage 'MSYS2 core update failed'
-Invoke-MsysBash -BashPath $bashPath -Command 'pacman --noconfirm -Syuu' -FailureMessage 'MSYS2 package update failed'
+Invoke-MsysBash -BashPath $bashPath -Command 'pacman -Syu --noconfirm' -FailureMessage 'MSYS2 core update failed'
+Invoke-MsysBash -BashPath $bashPath -Command 'pacman -Syu --noconfirm' -FailureMessage 'MSYS2 package update failed'
 Invoke-MsysBash -BashPath $bashPath -Command 'pacman --noconfirm -S --needed make mingw-w64-x86_64-gcc' -FailureMessage 'Installing GNU Make and MinGW-w64 GCC failed'
 Invoke-MsysBash -BashPath $bashPath -Command 'command -v make && command -v gcc && command -v windres' -FailureMessage 'GNU Make, GCC or windres is still missing'
 
