@@ -1,23 +1,29 @@
 #requires -Version 5.1
-# Build the native Windows x64 backend. Supports Windows PowerShell 5.1 and PowerShell 7+.
+# Native Windows x64 build. Supports Windows PowerShell 5.1 and PowerShell 7+.
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 Set-StrictMode -Version Latest
 
 $script:PowerShellVersion = $PSVersionTable.PSVersion
-$script:PowerShellEdition = if ($PSVersionTable.PSEdition) { $PSVersionTable.PSEdition } else { 'Desktop' }
+$script:PowerShellEdition = if ($PSVersionTable.PSEdition) {
+    $PSVersionTable.PSEdition
+} else {
+    'Desktop'
+}
 Write-Host "PowerShell: $script:PowerShellEdition $script:PowerShellVersion"
 
 if ($env:OS -ne 'Windows_NT') {
     throw 'This build script must run on Windows.'
 }
-if (-not [Environment]::Is64BitOperatingSystem -or
-    $env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or
+if (-not [Environment]::Is64BitOperatingSystem) {
+    throw 'This backend currently targets 64-bit Windows only.'
+}
+if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or
     $env:PROCESSOR_ARCHITEW6432 -eq 'ARM64') {
-    throw 'This backend currently targets x64 Windows only.'
+    throw 'This backend currently targets x64 Windows, not Windows on ARM.'
 }
 
-# Windows PowerShell 5.1 may otherwise negotiate an older TLS version on some machines.
+# Windows PowerShell 5.1 may otherwise negotiate an older TLS version.
 if ($script:PowerShellEdition -eq 'Desktop') {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 }
@@ -38,9 +44,8 @@ function Invoke-CompatDownload {
     if ($Headers) {
         $request.Headers = $Headers
     }
-
-    # -UseBasicParsing is needed for compatibility with Windows PowerShell 5.1.
     if ($script:PowerShellVersion.Major -le 5) {
+        # Required for reliable downloads with Windows PowerShell 5.1.
         $request.UseBasicParsing = $true
     }
 
@@ -71,7 +76,8 @@ function Test-WritableEmptyDirectory {
 
     try {
         if (Test-Path -LiteralPath $Path) {
-            if (Get-ChildItem -LiteralPath $Path -Force | Select-Object -First 1) {
+            $existing = Get-ChildItem -LiteralPath $Path -Force | Select-Object -First 1
+            if ($null -ne $existing) {
                 return $false
             }
         } else {
@@ -106,8 +112,8 @@ if (-not (Test-Path -LiteralPath (Join-Path $sourceDir 'Makefile'))) {
     throw "Windows source tree was not found: $sourceDir"
 }
 
-# MSYS2 and GNU Make are unreliable in non-ASCII/space-containing build paths.
-# Stage source and dependencies in a short ASCII-only temporary directory.
+# MSYS2 tools can fail in paths containing Turkish characters or spaces.
+# Compile in a short ASCII-only workspace, then copy outputs back to windows\bin.
 $stagingCandidates = @()
 if ($env:TEMP) {
     $stagingCandidates += (Join-Path $env:TEMP 'gdpibuild')
@@ -123,25 +129,25 @@ foreach ($candidate in $stagingCandidates) {
     }
 }
 if (-not $stagingRoot) {
-    throw 'Could not create an ASCII-only temporary build directory. Ensure C:\gdpibuild or %TEMP%\gdpibuild is writable and contains no spaces or non-ASCII characters.'
+    throw 'Could not create an ASCII-only temporary build directory. Make %TEMP%\gdpibuild or C:\gdpibuild writable.'
 }
 
 $cacheDir = Join-Path $stagingRoot 'cache'
 New-Item -ItemType Directory -Force -Path $cacheDir | Out-Null
 
-# Find an existing MSYS2 install before downloading one.
-# An explicitly supplied MSYS2_ROOT is authoritative; this also lets CI verify
-# the clean-install/bootstrap path even when its image has another MSYS2 copy.
+# MSYS2_ROOT overrides automatic discovery. If set to a new empty directory,
+# the script installs MSYS2 there; this is also used by the clean-bootstrap CI job.
 $requestedMsysRoot = $null
 if (-not [string]::IsNullOrWhiteSpace($env:MSYS2_ROOT)) {
     $requestedMsysRoot = [System.IO.Path]::GetFullPath($env:MSYS2_ROOT)
 }
 
 $msysRoot = $null
-if ($requestedMsysRoot -and
-    (Test-Path -LiteralPath (Join-Path $requestedMsysRoot 'usr\bin\bash.exe'))) {
-    $msysRoot = $requestedMsysRoot
-} elseif (-not $requestedMsysRoot) {
+if ($requestedMsysRoot) {
+    if (Test-Path -LiteralPath (Join-Path $requestedMsysRoot 'usr\bin\bash.exe')) {
+        $msysRoot = $requestedMsysRoot
+    }
+} else {
     $msysRoots = @('C:\msys64')
     if ($env:LOCALAPPDATA) {
         $msysRoots += (Join-Path $env:LOCALAPPDATA 'msys64')
@@ -156,520 +162,47 @@ if ($requestedMsysRoot -and
 }
 
 if (-not $msysRoot) {
-    Write-Host 'MSYS2 was not found. Downloading the latest stable official x64 installer...'
+    Write-Host 'MSYS2 was not found. Resolving the newest stable official x64 installer...'
 
-    # Use the latest dated stable release, not the nightly channel. GitHub's
-    # release metadata supplies the SHA-256 digest for the exact installer asset.
+    # /releases/latest currently points to the rolling nightly channel for MSYS2.
+    # Select the first dated, non-prerelease release that exposes a SHA-256 digest.
     $releaseApi = 'https://api.github.com/repos/msys2/msys2-installer/releases?per_page=100'
-    $headers = @{
+    $apiHeaders = @{
         'User-Agent' = 'GoodbyeDPI-Turkey-build'
         'Accept' = 'application/vnd.github+json'
+        'X-GitHub-Api-Version' = '2022-11-28'
     }
-    $releases = @(Invoke-RestMethod -Uri $releaseApi -Headers $headers -TimeoutSec 60)
+    $releases = @(Invoke-RestMethod -Uri $releaseApi -Headers $apiHeaders -TimeoutSec 60)
 
-    # GitHub's /releases/latest endpoint may resolve to MSYS2's rolling nightly
-    # channel. Select the newest dated, non-prerelease stable release instead.
     $release = $null
     $installerAsset = $null
     foreach ($candidateRelease in $releases) {
         if ($candidateRelease.draft -or $candidateRelease.prerelease -or
-            $candidateRelease.tag_name -notmatch '^\d{4}-\d{2}-\d{2}
-
-    $installerPath = Join-Path $cacheDir $installerAsset.name
-    Invoke-CompatDownload -Uri $installerAsset.browser_download_url -OutFile $installerPath
-    $expectedInstallerHash = $installerAsset.digest.Substring(7).ToLowerInvariant()
-    $actualInstallerHash = (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($actualInstallerHash -ne $expectedInstallerHash) {
-        Remove-Item -LiteralPath $installerPath -Force
-        throw "MSYS2 installer SHA-256 mismatch. Expected $expectedInstallerHash; received $actualInstallerHash."
-    }
-    Write-Host "MSYS2 installer SHA-256 verified: $actualInstallerHash"
-
-    # Stable MSYS2 installers are Authenticode-signed. Require a valid signature
-    # as a separate check; a valid signature is publisher verification, not a
-    # malware-clean verdict.
-    $installerSignature = Get-AuthenticodeSignature -LiteralPath $installerPath
-    if ($installerSignature.Status -ne 'Valid') {
-        throw "MSYS2 installer Authenticode verification failed: $($installerSignature.Status). $($installerSignature.StatusMessage)"
-    }
-    Write-Host "MSYS2 signer: $($installerSignature.SignerCertificate.Subject)"
-
-    # Prefer a per-user install. An explicit MSYS2_ROOT overrides the default locations.
-    $installCandidates = @()
-    if ($requestedMsysRoot) {
-        $installCandidates += $requestedMsysRoot
-    } else {
-        if ($env:LOCALAPPDATA) {
-            $installCandidates += (Join-Path $env:LOCALAPPDATA 'msys64')
-        }
-        $installCandidates += 'C:\msys64'
-    }
-
-    $installRoot = $null
-    foreach ($candidate in ($installCandidates | Select-Object -Unique)) {
-        if ((Test-AsciiNoSpacePath -Path $candidate) -and
-            (Test-WritableEmptyDirectory -Path $candidate)) {
-            $installRoot = $candidate
-            break
-        }
-    }
-    if (-not $installRoot) {
-        throw 'No writable empty ASCII-only MSYS2 install path was found. Remove an incomplete prior installation or set MSYS2_ROOT to a new empty directory.'
-    }
-
-    $installerRootArgument = $installRoot.Replace('\', '/')
-    Write-Host "Installing MSYS2 to $installRoot ..."
-    & $installerPath 'in' '--confirm-command' '--accept-messages' '--root' $installerRootArgument
-    if ($LASTEXITCODE -ne 0) {
-        throw "MSYS2 installer failed (exit code $LASTEXITCODE)."
-    }
-
-    if (-not (Test-Path -LiteralPath (Join-Path $installRoot 'usr\bin\bash.exe'))) {
-        throw 'MSYS2 installer completed but usr\bin\bash.exe was not found.'
-    }
-    $msysRoot = $installRoot
-}
-
-$bashPath = Join-Path $msysRoot 'usr\bin\bash.exe'
-if (-not (Test-Path -LiteralPath $bashPath)) {
-    throw "MSYS2 bash.exe was not found under $msysRoot."
-}
-
-# MSYS2's own documentation recommends running pacman from a login shell.
-$env:MSYSTEM = 'UCRT64'
-$env:CHERE_INVOKING = 'yes'
-Write-Host "Using MSYS2: $msysRoot"
-Write-Host 'Updating MSYS2 package database and installing UCRT64 GCC + GNU Make...'
-
-Invoke-MsysBash -BashPath $bashPath -Command ' ' -FailureMessage 'MSYS2 first-run initialization failed'
-Invoke-MsysBash -BashPath $bashPath -Command 'pacman -Syu --noconfirm' -FailureMessage 'MSYS2 core update failed'
-Invoke-MsysBash -BashPath $bashPath -Command 'pacman -Syu --noconfirm' -FailureMessage 'MSYS2 package update failed'
-Invoke-MsysBash -BashPath $bashPath -Command 'pacman --noconfirm -S --needed make mingw-w64-ucrt-x86_64-gcc' -FailureMessage 'Installing GNU Make and MinGW-w64 GCC failed'
-Invoke-MsysBash -BashPath $bashPath -Command 'command -v make && command -v gcc && command -v windres' -FailureMessage 'GNU Make, GCC or windres is still missing'
-
-# Download and verify the pinned WinDivert SDK/runtime.
-$version = 'WinDivert-2.2.2-A'
-$winDivertSha256 = '63cb41763bb4b20f600b6de04e991a9c2be73279e317d4d82f237b150c5f3f15'
-$winDivertUrl = 'https://github.com/basil00/WinDivert/releases/download/v2.2.2/WinDivert-2.2.2-A.zip'
-$archive = Join-Path $cacheDir "$version.zip"
-$actualWinDivertHash = $null
-
-if (Test-Path -LiteralPath $archive) {
-    $actualWinDivertHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-}
-if ($actualWinDivertHash -ne $winDivertSha256) {
-    if (Test-Path -LiteralPath $archive) {
-        Remove-Item -LiteralPath $archive -Force
-    }
-    Write-Host "Downloading pinned $version archive..."
-    Invoke-CompatDownload -Uri $winDivertUrl -OutFile $archive
-    $actualWinDivertHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-}
-if ($actualWinDivertHash -ne $winDivertSha256) {
-    throw "WinDivert archive SHA-256 mismatch. Expected $winDivertSha256; got $actualWinDivertHash. The archive was not extracted."
-}
-Write-Host "WinDivert SHA-256 verified: $actualWinDivertHash"
-
-# Copy the source tree into the ASCII-only staging directory before invoking MSYS2.
-$workDir = Join-Path $stagingRoot 'work'
-$stagedSource = Join-Path $workDir 'src'
-$stagedDeps = Join-Path $workDir 'deps'
-if (Test-Path -LiteralPath $workDir) {
-    Remove-Item -LiteralPath $workDir -Recurse -Force
-}
-New-Item -ItemType Directory -Force -Path $stagedSource, $stagedDeps | Out-Null
-Copy-Item -Path (Join-Path $sourceDir '*') -Destination $stagedSource -Recurse -Force
-Expand-Archive -LiteralPath $archive -DestinationPath $stagedDeps -Force
-
-$runtimeDir = Join-Path (Join-Path $stagedDeps $version) 'x64'
-if (-not (Test-Path -LiteralPath (Join-Path (Join-Path $stagedDeps $version) 'include\windivert.h'))) {
-    throw 'The verified WinDivert archive does not contain include\windivert.h.'
-}
-
-Push-Location $stagedSource
-try {
-    Invoke-MsysBash -BashPath $bashPath -Command 'make clean' -FailureMessage 'make clean failed'
-    Invoke-MsysBash -BashPath $bashPath -Command "make BIT64=1 WINDIVERT_DIR=../deps/$version" -FailureMessage 'Windows x64 compilation failed'
-} finally {
-    Pop-Location
-}
-
-$builtExe = Join-Path $stagedSource 'goodbyedpi.exe'
-if (-not (Test-Path -LiteralPath $builtExe)) {
-    throw 'Build did not produce goodbyedpi.exe.'
-}
-
-$runtimeFiles = Get-ChildItem -LiteralPath $runtimeDir -File |
-    Where-Object { $_.Extension -in '.dll', '.sys' }
-$driverFiles = @($runtimeFiles | Where-Object { $_.Extension -eq '.sys' })
-if (-not ($runtimeFiles | Where-Object { $_.Extension -eq '.dll' }) -or
-    $driverFiles.Count -eq 0) {
-    throw 'The pinned WinDivert archive did not contain the expected x64 DLL and SYS runtime files.'
-}
-
-# Verify the Windows kernel driver signature before placing it in the runtime package.
-# Authenticode validity confirms publisher/signature integrity; it does not establish
-# that an antivirus product will classify the file as benign.
-foreach ($driverFile in $driverFiles) {
-    $driverSignature = Get-AuthenticodeSignature -LiteralPath $driverFile.FullName
-    if ($driverSignature.Status -ne 'Valid') {
-        throw "WinDivert driver signature verification failed for $($driverFile.Name): $($driverSignature.Status). $($driverSignature.StatusMessage)"
-    }
-    Write-Host "WinDivert driver signer ($($driverFile.Name)): $($driverSignature.SignerCertificate.Subject)"
-}
-
-$binDir = Join-Path $windowsDir 'bin'
-if (Test-Path -LiteralPath $binDir) {
-    Remove-Item -LiteralPath $binDir -Recurse -Force
-}
-New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-Copy-Item -LiteralPath $builtExe -Destination $binDir -Force
-$runtimeFiles | Copy-Item -Destination $binDir -Force
-
-Write-Host ''
-Write-Host "Build complete: $(Join-Path $binDir 'goodbyedpi.exe')"
-Write-Host "PowerShell compatibility path: $script:PowerShellEdition $script:PowerShellVersion"
-Write-Host 'Run .\run.cmd from the windows folder, or open it as Administrator to start GoodbyeDPI.'
-Write-Host "ASCII build workspace: $workDir"
-) {
+            $candidateRelease.tag_name -notmatch '^\d{4}-\d{2}-\d{2}$') {
             continue
         }
 
         $candidateAsset = $candidateRelease.assets |
-            Where-Object { $_.name -match '^msys2-x86_64-\d{8}\.exe
-
-    $installerPath = Join-Path $cacheDir $installerAsset.name
-    Invoke-CompatDownload -Uri $installerAsset.browser_download_url -OutFile $installerPath
-    $expectedInstallerHash = $installerAsset.digest.Substring(7).ToLowerInvariant()
-    $actualInstallerHash = (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($actualInstallerHash -ne $expectedInstallerHash) {
-        Remove-Item -LiteralPath $installerPath -Force
-        throw "MSYS2 installer SHA-256 mismatch. Expected $expectedInstallerHash; received $actualInstallerHash."
-    }
-    Write-Host "MSYS2 installer SHA-256 verified: $actualInstallerHash"
-
-    # Stable MSYS2 installers are Authenticode-signed. Require a valid signature
-    # as a separate check; a valid signature is publisher verification, not a
-    # malware-clean verdict.
-    $installerSignature = Get-AuthenticodeSignature -LiteralPath $installerPath
-    if ($installerSignature.Status -ne 'Valid') {
-        throw "MSYS2 installer Authenticode verification failed: $($installerSignature.Status). $($installerSignature.StatusMessage)"
-    }
-    Write-Host "MSYS2 signer: $($installerSignature.SignerCertificate.Subject)"
-
-    # Prefer a per-user install. An explicit MSYS2_ROOT overrides the default locations.
-    $installCandidates = @()
-    if ($requestedMsysRoot) {
-        $installCandidates += $requestedMsysRoot
-    } else {
-        if ($env:LOCALAPPDATA) {
-            $installCandidates += (Join-Path $env:LOCALAPPDATA 'msys64')
-        }
-        $installCandidates += 'C:\msys64'
-    }
-
-    $installRoot = $null
-    foreach ($candidate in ($installCandidates | Select-Object -Unique)) {
-        if ((Test-AsciiNoSpacePath -Path $candidate) -and
-            (Test-WritableEmptyDirectory -Path $candidate)) {
-            $installRoot = $candidate
-            break
-        }
-    }
-    if (-not $installRoot) {
-        throw 'No writable empty ASCII-only MSYS2 install path was found. Remove an incomplete prior installation or set MSYS2_ROOT to a new empty directory.'
-    }
-
-    $installerRootArgument = $installRoot.Replace('\', '/')
-    Write-Host "Installing MSYS2 to $installRoot ..."
-    & $installerPath 'in' '--confirm-command' '--accept-messages' '--root' $installerRootArgument
-    if ($LASTEXITCODE -ne 0) {
-        throw "MSYS2 installer failed (exit code $LASTEXITCODE)."
-    }
-
-    if (-not (Test-Path -LiteralPath (Join-Path $installRoot 'usr\bin\bash.exe'))) {
-        throw 'MSYS2 installer completed but usr\bin\bash.exe was not found.'
-    }
-    $msysRoot = $installRoot
-}
-
-$bashPath = Join-Path $msysRoot 'usr\bin\bash.exe'
-if (-not (Test-Path -LiteralPath $bashPath)) {
-    throw "MSYS2 bash.exe was not found under $msysRoot."
-}
-
-# MSYS2's own documentation recommends running pacman from a login shell.
-$env:MSYSTEM = 'UCRT64'
-$env:CHERE_INVOKING = 'yes'
-Write-Host "Using MSYS2: $msysRoot"
-Write-Host 'Updating MSYS2 package database and installing UCRT64 GCC + GNU Make...'
-
-Invoke-MsysBash -BashPath $bashPath -Command ' ' -FailureMessage 'MSYS2 first-run initialization failed'
-Invoke-MsysBash -BashPath $bashPath -Command 'pacman -Syu --noconfirm' -FailureMessage 'MSYS2 core update failed'
-Invoke-MsysBash -BashPath $bashPath -Command 'pacman -Syu --noconfirm' -FailureMessage 'MSYS2 package update failed'
-Invoke-MsysBash -BashPath $bashPath -Command 'pacman --noconfirm -S --needed make mingw-w64-ucrt-x86_64-gcc' -FailureMessage 'Installing GNU Make and MinGW-w64 GCC failed'
-Invoke-MsysBash -BashPath $bashPath -Command 'command -v make && command -v gcc && command -v windres' -FailureMessage 'GNU Make, GCC or windres is still missing'
-
-# Download and verify the pinned WinDivert SDK/runtime.
-$version = 'WinDivert-2.2.2-A'
-$winDivertSha256 = '63cb41763bb4b20f600b6de04e991a9c2be73279e317d4d82f237b150c5f3f15'
-$winDivertUrl = 'https://github.com/basil00/WinDivert/releases/download/v2.2.2/WinDivert-2.2.2-A.zip'
-$archive = Join-Path $cacheDir "$version.zip"
-$actualWinDivertHash = $null
-
-if (Test-Path -LiteralPath $archive) {
-    $actualWinDivertHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-}
-if ($actualWinDivertHash -ne $winDivertSha256) {
-    if (Test-Path -LiteralPath $archive) {
-        Remove-Item -LiteralPath $archive -Force
-    }
-    Write-Host "Downloading pinned $version archive..."
-    Invoke-CompatDownload -Uri $winDivertUrl -OutFile $archive
-    $actualWinDivertHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-}
-if ($actualWinDivertHash -ne $winDivertSha256) {
-    throw "WinDivert archive SHA-256 mismatch. Expected $winDivertSha256; got $actualWinDivertHash. The archive was not extracted."
-}
-Write-Host "WinDivert SHA-256 verified: $actualWinDivertHash"
-
-# Copy the source tree into the ASCII-only staging directory before invoking MSYS2.
-$workDir = Join-Path $stagingRoot 'work'
-$stagedSource = Join-Path $workDir 'src'
-$stagedDeps = Join-Path $workDir 'deps'
-if (Test-Path -LiteralPath $workDir) {
-    Remove-Item -LiteralPath $workDir -Recurse -Force
-}
-New-Item -ItemType Directory -Force -Path $stagedSource, $stagedDeps | Out-Null
-Copy-Item -Path (Join-Path $sourceDir '*') -Destination $stagedSource -Recurse -Force
-Expand-Archive -LiteralPath $archive -DestinationPath $stagedDeps -Force
-
-$runtimeDir = Join-Path (Join-Path $stagedDeps $version) 'x64'
-if (-not (Test-Path -LiteralPath (Join-Path (Join-Path $stagedDeps $version) 'include\windivert.h'))) {
-    throw 'The verified WinDivert archive does not contain include\windivert.h.'
-}
-
-Push-Location $stagedSource
-try {
-    Invoke-MsysBash -BashPath $bashPath -Command 'make clean' -FailureMessage 'make clean failed'
-    Invoke-MsysBash -BashPath $bashPath -Command "make BIT64=1 WINDIVERT_DIR=../deps/$version" -FailureMessage 'Windows x64 compilation failed'
-} finally {
-    Pop-Location
-}
-
-$builtExe = Join-Path $stagedSource 'goodbyedpi.exe'
-if (-not (Test-Path -LiteralPath $builtExe)) {
-    throw 'Build did not produce goodbyedpi.exe.'
-}
-
-$runtimeFiles = Get-ChildItem -LiteralPath $runtimeDir -File |
-    Where-Object { $_.Extension -in '.dll', '.sys' }
-$driverFiles = @($runtimeFiles | Where-Object { $_.Extension -eq '.sys' })
-if (-not ($runtimeFiles | Where-Object { $_.Extension -eq '.dll' }) -or
-    $driverFiles.Count -eq 0) {
-    throw 'The pinned WinDivert archive did not contain the expected x64 DLL and SYS runtime files.'
-}
-
-# Verify the Windows kernel driver signature before placing it in the runtime package.
-# Authenticode validity confirms publisher/signature integrity; it does not establish
-# that an antivirus product will classify the file as benign.
-foreach ($driverFile in $driverFiles) {
-    $driverSignature = Get-AuthenticodeSignature -LiteralPath $driverFile.FullName
-    if ($driverSignature.Status -ne 'Valid') {
-        throw "WinDivert driver signature verification failed for $($driverFile.Name): $($driverSignature.Status). $($driverSignature.StatusMessage)"
-    }
-    Write-Host "WinDivert driver signer ($($driverFile.Name)): $($driverSignature.SignerCertificate.Subject)"
-}
-
-$binDir = Join-Path $windowsDir 'bin'
-if (Test-Path -LiteralPath $binDir) {
-    Remove-Item -LiteralPath $binDir -Recurse -Force
-}
-New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-Copy-Item -LiteralPath $builtExe -Destination $binDir -Force
-$runtimeFiles | Copy-Item -Destination $binDir -Force
-
-Write-Host ''
-Write-Host "Build complete: $(Join-Path $binDir 'goodbyedpi.exe')"
-Write-Host "PowerShell compatibility path: $script:PowerShellEdition $script:PowerShellVersion"
-Write-Host 'Run .\run.cmd from the windows folder, or open it as Administrator to start GoodbyeDPI.'
-Write-Host "ASCII build workspace: $workDir"
- } |
+            Where-Object { $_.name -match '^msys2-x86_64-\d{8}\.exe$' } |
             Select-Object -First 1
 
-        if ($candidateAsset -and $candidateAsset.browser_download_url -and
-            $candidateAsset.digest -match '^sha256:[0-9a-fA-F]{64}
-
-    $installerPath = Join-Path $cacheDir $installerAsset.name
-    Invoke-CompatDownload -Uri $installerAsset.browser_download_url -OutFile $installerPath
-    $expectedInstallerHash = $installerAsset.digest.Substring(7).ToLowerInvariant()
-    $actualInstallerHash = (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($actualInstallerHash -ne $expectedInstallerHash) {
-        Remove-Item -LiteralPath $installerPath -Force
-        throw "MSYS2 installer SHA-256 mismatch. Expected $expectedInstallerHash; received $actualInstallerHash."
-    }
-    Write-Host "MSYS2 installer SHA-256 verified: $actualInstallerHash"
-
-    # Stable MSYS2 installers are Authenticode-signed. Require a valid signature
-    # as a separate check; a valid signature is publisher verification, not a
-    # malware-clean verdict.
-    $installerSignature = Get-AuthenticodeSignature -LiteralPath $installerPath
-    if ($installerSignature.Status -ne 'Valid') {
-        throw "MSYS2 installer Authenticode verification failed: $($installerSignature.Status). $($installerSignature.StatusMessage)"
-    }
-    Write-Host "MSYS2 signer: $($installerSignature.SignerCertificate.Subject)"
-
-    # Prefer a per-user install. An explicit MSYS2_ROOT overrides the default locations.
-    $installCandidates = @()
-    if ($requestedMsysRoot) {
-        $installCandidates += $requestedMsysRoot
-    } else {
-        if ($env:LOCALAPPDATA) {
-            $installCandidates += (Join-Path $env:LOCALAPPDATA 'msys64')
-        }
-        $installCandidates += 'C:\msys64'
-    }
-
-    $installRoot = $null
-    foreach ($candidate in ($installCandidates | Select-Object -Unique)) {
-        if ((Test-AsciiNoSpacePath -Path $candidate) -and
-            (Test-WritableEmptyDirectory -Path $candidate)) {
-            $installRoot = $candidate
-            break
-        }
-    }
-    if (-not $installRoot) {
-        throw 'No writable empty ASCII-only MSYS2 install path was found. Remove an incomplete prior installation or set MSYS2_ROOT to a new empty directory.'
-    }
-
-    $installerRootArgument = $installRoot.Replace('\', '/')
-    Write-Host "Installing MSYS2 to $installRoot ..."
-    & $installerPath 'in' '--confirm-command' '--accept-messages' '--root' $installerRootArgument
-    if ($LASTEXITCODE -ne 0) {
-        throw "MSYS2 installer failed (exit code $LASTEXITCODE)."
-    }
-
-    if (-not (Test-Path -LiteralPath (Join-Path $installRoot 'usr\bin\bash.exe'))) {
-        throw 'MSYS2 installer completed but usr\bin\bash.exe was not found.'
-    }
-    $msysRoot = $installRoot
-}
-
-$bashPath = Join-Path $msysRoot 'usr\bin\bash.exe'
-if (-not (Test-Path -LiteralPath $bashPath)) {
-    throw "MSYS2 bash.exe was not found under $msysRoot."
-}
-
-# MSYS2's own documentation recommends running pacman from a login shell.
-$env:MSYSTEM = 'UCRT64'
-$env:CHERE_INVOKING = 'yes'
-Write-Host "Using MSYS2: $msysRoot"
-Write-Host 'Updating MSYS2 package database and installing UCRT64 GCC + GNU Make...'
-
-Invoke-MsysBash -BashPath $bashPath -Command ' ' -FailureMessage 'MSYS2 first-run initialization failed'
-Invoke-MsysBash -BashPath $bashPath -Command 'pacman -Syu --noconfirm' -FailureMessage 'MSYS2 core update failed'
-Invoke-MsysBash -BashPath $bashPath -Command 'pacman -Syu --noconfirm' -FailureMessage 'MSYS2 package update failed'
-Invoke-MsysBash -BashPath $bashPath -Command 'pacman --noconfirm -S --needed make mingw-w64-ucrt-x86_64-gcc' -FailureMessage 'Installing GNU Make and MinGW-w64 GCC failed'
-Invoke-MsysBash -BashPath $bashPath -Command 'command -v make && command -v gcc && command -v windres' -FailureMessage 'GNU Make, GCC or windres is still missing'
-
-# Download and verify the pinned WinDivert SDK/runtime.
-$version = 'WinDivert-2.2.2-A'
-$winDivertSha256 = '63cb41763bb4b20f600b6de04e991a9c2be73279e317d4d82f237b150c5f3f15'
-$winDivertUrl = 'https://github.com/basil00/WinDivert/releases/download/v2.2.2/WinDivert-2.2.2-A.zip'
-$archive = Join-Path $cacheDir "$version.zip"
-$actualWinDivertHash = $null
-
-if (Test-Path -LiteralPath $archive) {
-    $actualWinDivertHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-}
-if ($actualWinDivertHash -ne $winDivertSha256) {
-    if (Test-Path -LiteralPath $archive) {
-        Remove-Item -LiteralPath $archive -Force
-    }
-    Write-Host "Downloading pinned $version archive..."
-    Invoke-CompatDownload -Uri $winDivertUrl -OutFile $archive
-    $actualWinDivertHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-}
-if ($actualWinDivertHash -ne $winDivertSha256) {
-    throw "WinDivert archive SHA-256 mismatch. Expected $winDivertSha256; got $actualWinDivertHash. The archive was not extracted."
-}
-Write-Host "WinDivert SHA-256 verified: $actualWinDivertHash"
-
-# Copy the source tree into the ASCII-only staging directory before invoking MSYS2.
-$workDir = Join-Path $stagingRoot 'work'
-$stagedSource = Join-Path $workDir 'src'
-$stagedDeps = Join-Path $workDir 'deps'
-if (Test-Path -LiteralPath $workDir) {
-    Remove-Item -LiteralPath $workDir -Recurse -Force
-}
-New-Item -ItemType Directory -Force -Path $stagedSource, $stagedDeps | Out-Null
-Copy-Item -Path (Join-Path $sourceDir '*') -Destination $stagedSource -Recurse -Force
-Expand-Archive -LiteralPath $archive -DestinationPath $stagedDeps -Force
-
-$runtimeDir = Join-Path (Join-Path $stagedDeps $version) 'x64'
-if (-not (Test-Path -LiteralPath (Join-Path (Join-Path $stagedDeps $version) 'include\windivert.h'))) {
-    throw 'The verified WinDivert archive does not contain include\windivert.h.'
-}
-
-Push-Location $stagedSource
-try {
-    Invoke-MsysBash -BashPath $bashPath -Command 'make clean' -FailureMessage 'make clean failed'
-    Invoke-MsysBash -BashPath $bashPath -Command "make BIT64=1 WINDIVERT_DIR=../deps/$version" -FailureMessage 'Windows x64 compilation failed'
-} finally {
-    Pop-Location
-}
-
-$builtExe = Join-Path $stagedSource 'goodbyedpi.exe'
-if (-not (Test-Path -LiteralPath $builtExe)) {
-    throw 'Build did not produce goodbyedpi.exe.'
-}
-
-$runtimeFiles = Get-ChildItem -LiteralPath $runtimeDir -File |
-    Where-Object { $_.Extension -in '.dll', '.sys' }
-$driverFiles = @($runtimeFiles | Where-Object { $_.Extension -eq '.sys' })
-if (-not ($runtimeFiles | Where-Object { $_.Extension -eq '.dll' }) -or
-    $driverFiles.Count -eq 0) {
-    throw 'The pinned WinDivert archive did not contain the expected x64 DLL and SYS runtime files.'
-}
-
-# Verify the Windows kernel driver signature before placing it in the runtime package.
-# Authenticode validity confirms publisher/signature integrity; it does not establish
-# that an antivirus product will classify the file as benign.
-foreach ($driverFile in $driverFiles) {
-    $driverSignature = Get-AuthenticodeSignature -LiteralPath $driverFile.FullName
-    if ($driverSignature.Status -ne 'Valid') {
-        throw "WinDivert driver signature verification failed for $($driverFile.Name): $($driverSignature.Status). $($driverSignature.StatusMessage)"
-    }
-    Write-Host "WinDivert driver signer ($($driverFile.Name)): $($driverSignature.SignerCertificate.Subject)"
-}
-
-$binDir = Join-Path $windowsDir 'bin'
-if (Test-Path -LiteralPath $binDir) {
-    Remove-Item -LiteralPath $binDir -Recurse -Force
-}
-New-Item -ItemType Directory -Force -Path $binDir | Out-Null
-Copy-Item -LiteralPath $builtExe -Destination $binDir -Force
-$runtimeFiles | Copy-Item -Destination $binDir -Force
-
-Write-Host ''
-Write-Host "Build complete: $(Join-Path $binDir 'goodbyedpi.exe')"
-Write-Host "PowerShell compatibility path: $script:PowerShellEdition $script:PowerShellVersion"
-Write-Host 'Run .\run.cmd from the windows folder, or open it as Administrator to start GoodbyeDPI.'
-Write-Host "ASCII build workspace: $workDir"
-) {
+        if ($null -ne $candidateAsset -and
+            $candidateAsset.browser_download_url -and
+            $candidateAsset.digest -match '^sha256:[0-9a-fA-F]{64}$') {
             $release = $candidateRelease
             $installerAsset = $candidateAsset
             break
         }
     }
 
-    if (-not $release -or -not $installerAsset) {
-        throw 'Could not find a dated stable MSYS2 x64 installer with a SHA-256 digest in the official release metadata.'
+    if ($null -eq $release -or $null -eq $installerAsset) {
+        throw 'Could not find a dated stable MSYS2 x64 installer with SHA-256 metadata in the official GitHub releases.'
     }
     Write-Host "Selected stable MSYS2 release: $($release.tag_name)"
 
     $installerPath = Join-Path $cacheDir $installerAsset.name
     Invoke-CompatDownload -Uri $installerAsset.browser_download_url -OutFile $installerPath
+
     $expectedInstallerHash = $installerAsset.digest.Substring(7).ToLowerInvariant()
     $actualInstallerHash = (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($actualInstallerHash -ne $expectedInstallerHash) {
@@ -678,16 +211,15 @@ Write-Host "ASCII build workspace: $workDir"
     }
     Write-Host "MSYS2 installer SHA-256 verified: $actualInstallerHash"
 
-    # Stable MSYS2 installers are Authenticode-signed. Require a valid signature
-    # as a separate check; a valid signature is publisher verification, not a
-    # malware-clean verdict.
+    # Require the Windows publisher signature too. This confirms signer/integrity,
+    # but does not claim the installer or any payload is malware-free.
     $installerSignature = Get-AuthenticodeSignature -LiteralPath $installerPath
     if ($installerSignature.Status -ne 'Valid') {
         throw "MSYS2 installer Authenticode verification failed: $($installerSignature.Status). $($installerSignature.StatusMessage)"
     }
     Write-Host "MSYS2 signer: $($installerSignature.SignerCertificate.Subject)"
 
-    # Prefer a per-user install. An explicit MSYS2_ROOT overrides the default locations.
+    # Prefer a per-user install. A caller-supplied root is used exactly as requested.
     $installCandidates = @()
     if ($requestedMsysRoot) {
         $installCandidates += $requestedMsysRoot
@@ -707,7 +239,7 @@ Write-Host "ASCII build workspace: $workDir"
         }
     }
     if (-not $installRoot) {
-        throw 'No writable empty ASCII-only MSYS2 install path was found. Remove an incomplete prior installation or set MSYS2_ROOT to a new empty directory.'
+        throw 'No writable empty ASCII-only MSYS2 install directory was found. Remove an incomplete install or set MSYS2_ROOT to a new empty directory.'
     }
 
     $installerRootArgument = $installRoot.Replace('\', '/')
@@ -717,8 +249,9 @@ Write-Host "ASCII build workspace: $workDir"
         throw "MSYS2 installer failed (exit code $LASTEXITCODE)."
     }
 
-    if (-not (Test-Path -LiteralPath (Join-Path $installRoot 'usr\bin\bash.exe'))) {
-        throw 'MSYS2 installer completed but usr\bin\bash.exe was not found.'
+    $installedBash = Join-Path $installRoot 'usr\bin\bash.exe'
+    if (-not (Test-Path -LiteralPath $installedBash)) {
+        throw "MSYS2 installer completed but bash.exe was not found at $installedBash"
     }
     $msysRoot = $installRoot
 }
@@ -728,25 +261,26 @@ if (-not (Test-Path -LiteralPath $bashPath)) {
     throw "MSYS2 bash.exe was not found under $msysRoot."
 }
 
-# MSYS2's own documentation recommends running pacman from a login shell.
+# UCRT64 is MSYS2's recommended 64-bit GCC environment. MINGW64 is legacy.
 $env:MSYSTEM = 'UCRT64'
 $env:CHERE_INVOKING = 'yes'
 Write-Host "Using MSYS2: $msysRoot"
-Write-Host 'Updating MSYS2 package database and installing UCRT64 GCC + GNU Make...'
+Write-Host 'Updating MSYS2 packages and installing UCRT64 GCC + GNU Make...'
 
+# Run the full update twice: the first pass may update the MSYS2 runtime itself.
 Invoke-MsysBash -BashPath $bashPath -Command ' ' -FailureMessage 'MSYS2 first-run initialization failed'
 Invoke-MsysBash -BashPath $bashPath -Command 'pacman -Syu --noconfirm' -FailureMessage 'MSYS2 core update failed'
 Invoke-MsysBash -BashPath $bashPath -Command 'pacman -Syu --noconfirm' -FailureMessage 'MSYS2 package update failed'
-Invoke-MsysBash -BashPath $bashPath -Command 'pacman --noconfirm -S --needed make mingw-w64-ucrt-x86_64-gcc' -FailureMessage 'Installing GNU Make and MinGW-w64 GCC failed'
+Invoke-MsysBash -BashPath $bashPath -Command 'pacman -S --needed --noconfirm make mingw-w64-ucrt-x86_64-gcc' -FailureMessage 'Installing UCRT64 GNU Make and GCC failed'
 Invoke-MsysBash -BashPath $bashPath -Command 'command -v make && command -v gcc && command -v windres' -FailureMessage 'GNU Make, GCC or windres is still missing'
 
-# Download and verify the pinned WinDivert SDK/runtime.
-$version = 'WinDivert-2.2.2-A'
+# Download and verify the pinned WinDivert SDK/runtime archive.
+$winDivertVersion = 'WinDivert-2.2.2-A'
 $winDivertSha256 = '63cb41763bb4b20f600b6de04e991a9c2be73279e317d4d82f237b150c5f3f15'
 $winDivertUrl = 'https://github.com/basil00/WinDivert/releases/download/v2.2.2/WinDivert-2.2.2-A.zip'
-$archive = Join-Path $cacheDir "$version.zip"
-$actualWinDivertHash = $null
+$archive = Join-Path $cacheDir "$winDivertVersion.zip"
 
+$actualWinDivertHash = $null
 if (Test-Path -LiteralPath $archive) {
     $actualWinDivertHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
 }
@@ -754,16 +288,16 @@ if ($actualWinDivertHash -ne $winDivertSha256) {
     if (Test-Path -LiteralPath $archive) {
         Remove-Item -LiteralPath $archive -Force
     }
-    Write-Host "Downloading pinned $version archive..."
+    Write-Host "Downloading pinned $winDivertVersion archive..."
     Invoke-CompatDownload -Uri $winDivertUrl -OutFile $archive
     $actualWinDivertHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 if ($actualWinDivertHash -ne $winDivertSha256) {
-    throw "WinDivert archive SHA-256 mismatch. Expected $winDivertSha256; got $actualWinDivertHash. The archive was not extracted."
+    throw "WinDivert archive SHA-256 mismatch. Expected $winDivertSha256; got $actualWinDivertHash."
 }
 Write-Host "WinDivert SHA-256 verified: $actualWinDivertHash"
 
-# Copy the source tree into the ASCII-only staging directory before invoking MSYS2.
+# Stage the source and dependency archive in the ASCII-only workspace.
 $workDir = Join-Path $stagingRoot 'work'
 $stagedSource = Join-Path $workDir 'src'
 $stagedDeps = Join-Path $workDir 'deps'
@@ -774,15 +308,16 @@ New-Item -ItemType Directory -Force -Path $stagedSource, $stagedDeps | Out-Null
 Copy-Item -Path (Join-Path $sourceDir '*') -Destination $stagedSource -Recurse -Force
 Expand-Archive -LiteralPath $archive -DestinationPath $stagedDeps -Force
 
-$runtimeDir = Join-Path (Join-Path $stagedDeps $version) 'x64'
-if (-not (Test-Path -LiteralPath (Join-Path (Join-Path $stagedDeps $version) 'include\windivert.h'))) {
+$dependencyRoot = Join-Path $stagedDeps $winDivertVersion
+$runtimeDir = Join-Path $dependencyRoot 'x64'
+if (-not (Test-Path -LiteralPath (Join-Path $dependencyRoot 'include\windivert.h'))) {
     throw 'The verified WinDivert archive does not contain include\windivert.h.'
 }
 
 Push-Location $stagedSource
 try {
     Invoke-MsysBash -BashPath $bashPath -Command 'make clean' -FailureMessage 'make clean failed'
-    Invoke-MsysBash -BashPath $bashPath -Command "make BIT64=1 WINDIVERT_DIR=../deps/$version" -FailureMessage 'Windows x64 compilation failed'
+    Invoke-MsysBash -BashPath $bashPath -Command "make BIT64=1 WINDIVERT_DIR=../deps/$winDivertVersion" -FailureMessage 'Windows x64 compilation failed'
 } finally {
     Pop-Location
 }
@@ -792,17 +327,16 @@ if (-not (Test-Path -LiteralPath $builtExe)) {
     throw 'Build did not produce goodbyedpi.exe.'
 }
 
-$runtimeFiles = Get-ChildItem -LiteralPath $runtimeDir -File |
-    Where-Object { $_.Extension -in '.dll', '.sys' }
+$runtimeFiles = @(Get-ChildItem -LiteralPath $runtimeDir -File |
+    Where-Object { $_.Extension -in '.dll', '.sys' })
 $driverFiles = @($runtimeFiles | Where-Object { $_.Extension -eq '.sys' })
 if (-not ($runtimeFiles | Where-Object { $_.Extension -eq '.dll' }) -or
     $driverFiles.Count -eq 0) {
     throw 'The pinned WinDivert archive did not contain the expected x64 DLL and SYS runtime files.'
 }
 
-# Verify the Windows kernel driver signature before placing it in the runtime package.
-# Authenticode validity confirms publisher/signature integrity; it does not establish
-# that an antivirus product will classify the file as benign.
+# Verify kernel-driver signatures before placing them in the runtime package.
+# A valid Authenticode signature is not an antivirus-clean verdict.
 foreach ($driverFile in $driverFiles) {
     $driverSignature = Get-AuthenticodeSignature -LiteralPath $driverFile.FullName
     if ($driverSignature.Status -ne 'Valid') {
