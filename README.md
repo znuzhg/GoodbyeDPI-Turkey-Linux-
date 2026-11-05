@@ -20,10 +20,10 @@ Windows derleme, çalıştırma, servis kurma ve kaldırma adımları için [Win
 
 1. [Windows x64 build Actions sayfasından](https://github.com/znuzhg/GoodbyeDPI-Turkey-Linux-/actions/workflows/windows-build.yml) son başarılı derlemenin `GoodbyeDPI-Turkey-Windows-x64` artefact ZIP dosyasını indir.
 2. ZIP'i çıkar.
-3. Çıkan klasörde yönetici olarak açılmış PowerShell penceresinden `.`\\`run.cmd` komutunu çalıştır.
+3. Çıkan klasörde yönetici olarak açılmış PowerShell penceresinden `.\run.cmd` komutunu çalıştır.
 4. Durdurmak için `Ctrl+C` kullan.
 
-İlk denemede otomatik servisi kurma. Önce normal çalıştırmanın bağlantında doğru davrandığını kontrol et. Otomatik başlatma istersen daha sonra `.`\\`install_service.cmd`; kaldırmak için `.`\\`remove_service.cmd` çalıştır. WinDivert DLL/SYS dosyaları derleme sırasında resmî kaynaktan SHA-256 doğrulamasıyla indirilir; ikili sürücü dosyaları Git deposuna eklenmez.
+İlk denemede otomatik servisi kurma. Önce normal çalıştırmanın bağlantında doğru davrandığını kontrol et. Otomatik başlatma istersen daha sonra `.\install_service.cmd`; kaldırmak için `.\remove_service.cmd` çalıştır. WinDivert DLL/SYS dosyaları derleme sırasında resmî kaynaktan SHA-256 doğrulamasıyla indirilir; ikili sürücü dosyaları Git deposuna eklenmez.
 
 
 
