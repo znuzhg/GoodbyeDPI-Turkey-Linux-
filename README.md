@@ -1,9 +1,22 @@
-# GoodbyeDPI Turkey - Linux
+# GoodbyeDPI Turkey - Linux & Windows
 
-> **[cagritaskn/GoodbyeDPI-Turkey](https://github.com/cagritaskn/GoodbyeDPI-Turkey)** projesinden fork edilmiş Linux portu (CachyOS, Arch Linux, ve diğer dağıtımlar).
-> Linux port forked from GoodbyeDPI-Turkey for Arch/CachyOS and other Linux distributions.
+> Bu depo, Linux portunu korurken Windows 10/11 x64 için ayrı bir WinDivert tabanlı uygulama da içerir.
+> Linux portu CachyOS, Arch Linux ve diğer Linux dağıtımları içindir; Windows kodu `windows/` altında ayrı tutulur.
 
 Discord, YouTube ve diğer ISP tarafından engellenen sitelere **VPN'siz** erişim sağlar.
+
+## Platform desteği
+
+| Platform | Uygulama | Durum |
+|---|---|---|
+| Linux | NFQUEUE + nftables + systemd | Mevcut Linux sürümü |
+| Windows 10/11 x64 | WinDivert + Windows Service + DNS/TTL takibi | Ayrı Windows backend'i; derleme CI ile doğrulanır |
+
+Windows uygulaması Linux kodunun doğrudan derlenmiş hâli değildir. Windows tarafında [cagritaskn/GoodbyeDPI-Turkey](https://github.com/cagritaskn/GoodbyeDPI-Turkey) projesinin WinDivert tabanlı Windows kaynakları ayrı bir `windows/src/` ağacında tutulur. Böylece Linux `src/` dizini ve NFQUEUE yolu değiştirilmez.
+
+Windows derleme, çalıştırma, servis kurma ve kaldırma adımları için [Windows rehberine](windows/README.md) bakın. WinDivert DLL/SYS dosyaları derleme sırasında resmî kaynaktan SHA-256 doğrulamasıyla indirilir; ikili sürücü dosyaları Git deposuna eklenmez.
+
+
 
 ---
 
@@ -163,9 +176,9 @@ make clean        # temizle
 
 ---
 
-## Windows'tan Fark
+## Platformların teknik farkları
 
-| Özellik | Windows | Linux |
+| Özellik | Windows (`windows/`) | Linux (`src/`) |
 |---|---|---|
 | DNS redirect | userspace (dnsredir.c) | nftables DNAT |
 | Paket yakalama | WinDivert | NFQUEUE |
@@ -207,4 +220,4 @@ sudo systemctl restart goodbyedpi
 
 ## Lisans / License
 
-MIT License — Özgürce kullanabilir, değiştirebilir ve dağıtabilirsiniz.
+Linux tarafındaki mevcut proje lisans bilgisi bu README'de korunmuştur. `windows/src/` altındaki içe aktarılan Windows kaynakları Apache License 2.0 kapsamındadır; lisans metni ve kaynak atfı `windows/` altında bulunur. WinDivert kendi lisansına tabidir.
