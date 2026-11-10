@@ -6,9 +6,9 @@
 // Connection tracking information for DNS requests
 typedef struct conntrack_info {
     uint8_t  is_ipv6;      // Flag indicating if IPv6 (1) or IPv4 (0)
-    uint32_t *srcip;     // Source IP address (supports both IPv4 and IPv6)
+    uint32_t srcip[4];  // Source IP address storage (16 bytes)
     uint16_t srcport;      // Source port
-    uint32_t *dstip;     // Destination IP address (supports both IPv4 and IPv6)
+    uint32_t dstip[4];  // Destination IP address storage (16 bytes)
     uint16_t dstport;      // Destination port
 } conntrack_info_t;
 
