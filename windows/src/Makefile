@@ -18,7 +18,7 @@ ifeq (, $(shell command -v $(CCWINDRES) 2>/dev/null))
 	CCWINDRES = windres
 endif
 
-CFLAGS = -std=c99 -pie -fPIE -pipe -I$(WINDIVERTHEADERS) -L$(WINDIVERTLIBS) \
+CFLAGS = -std=c99 -pie -fPIE -pipe -isystem $(WINDIVERTHEADERS) -L$(WINDIVERTLIBS) \
          -O2 -D_FORTIFY_SOURCE=2 -fstack-protector \
          -Wall -Wextra -Wpedantic -Wformat=2 -Wformat-overflow=2 -Wformat-truncation=2 \
          -Wformat-security -Wno-format-nonliteral -Wshadow -Wstrict-aliasing=1 \

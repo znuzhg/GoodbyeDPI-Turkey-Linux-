@@ -375,11 +375,11 @@ BYTE atoub(const char *str, const char *msg) {
 }
 
 
-static HANDLE init(const char *filter_string, UINT64 flags) {
+static HANDLE init(const char *filter_expression, UINT64 flags) {
     LPTSTR errormessage = NULL;
     DWORD errorcode;
     DWORD message_length;
-    HANDLE handle = WinDivertOpen(filter_string, WINDIVERT_LAYER_NETWORK, 0, flags);
+    HANDLE handle = WinDivertOpen(filter_expression, WINDIVERT_LAYER_NETWORK, 0, flags);
 
     if (handle != INVALID_HANDLE_VALUE)
         return handle;
@@ -1073,7 +1073,7 @@ int main(int argc, char *argv[]) {
                 debug_exit = true;
                 break;
             default:
-                puts("Usage: goodbyedpi.exe [OPTION...]\n"
+                fputs("Usage: goodbyedpi.exe [OPTION...]\n"
                 " -p          block passive DPI\n"
                 " -q          block QUIC/HTTP3\n"
                 " -r          replace Host with hoSt\n"
@@ -1104,8 +1104,9 @@ int main(int argc, char *argv[]) {
                 "                          by a2. If it's longer, (a1; a2) scale is used with the distance as a weight.\n"
                 "                          If the resulting TTL is more than m(ax), set it to m.\n"
                 "                          Default (if set): --auto-ttl 1-4-10. Also sets --min-ttl 3.\n"
-                "                          DANGEROUS! May break websites in unexpected ways. Use with care (or --blacklist).\n"
-                " --min-ttl     <value>    minimum TTL distance (128/64 - TTL) for which to send Fake Request\n"
+                "                          DANGEROUS! May break websites in unexpected ways. Use with care (or --blacklist).\n",
+                stdout);
+                fputs(" --min-ttl     <value>    minimum TTL distance (128/64 - TTL) for which to send Fake Request\n"
                 "                          in --set-ttl and --auto-ttl modes.\n"
                 " --wrong-chksum           activate Fake Request Mode and send it with incorrect TCP checksum.\n"
                 "                          May not work in a VM or with some routers, but is safer than set-ttl.\n"
@@ -1133,7 +1134,7 @@ int main(int argc, char *argv[]) {
                 "                          (like file transfers) in already established sessions.\n"
                 "                          May skip some huge HTTP requests from being processed.\n"
                 "                          Default (if set): --max-payload 1200.\n"
-                "\n");
+                "\n", stdout);
                 puts("LEGACY modesets:\n"
                 " -1          -p -r -s -f 2 -k 2 -n -e 2 (most compatible mode)\n"
                 " -2          -p -r -s -f 2 -k 2 -n -e 40 (better speed for HTTPS yet still compatible)\n"
