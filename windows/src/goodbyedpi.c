@@ -434,8 +434,9 @@ void deinit_all() {
     /* Also handle stop requests received during service startup. */
     InterlockedExchange(&exiting, 1);
     for (int i = 0; i < filter_num; i++) {
-        HANDLE handle = filters[i];
-        filters[i] = NULL;
+        /* Service control and the receive loop may both enter cleanup. */
+        HANDLE handle = (HANDLE)InterlockedExchangePointer(
+            (PVOID volatile *)&filters[i], NULL);
         if (handle && handle != INVALID_HANDLE_VALUE)
             deinit(handle);
     }
