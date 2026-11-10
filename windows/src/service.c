@@ -81,16 +81,27 @@ void service_main(int argc __attribute__((unused)),
 
     SetServiceStatus(hStatus, &ServiceStatus);
 
-    ServiceStatus.dwCurrentState = SERVICE_RUNNING;
-    ServiceStatus.dwControlsAccepted = SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN;
-    ServiceStatus.dwCheckPoint = 0;
-    ServiceStatus.dwWaitHint = 0;
-    SetServiceStatus(hStatus, &ServiceStatus);
-
     /* Run the original command line captured before service dispatch. */
     ServiceStatus.dwWin32ExitCode = (DWORD)main(service_argc, service_argv);
     ServiceStatus.dwCurrentState = SERVICE_STOPPED;
     ServiceStatus.dwControlsAccepted = 0;
+    ServiceStatus.dwCheckPoint = 0;
+    ServiceStatus.dwWaitHint = 0;
+    SetServiceStatus(hStatus, &ServiceStatus);
+}
+
+/*
+ * Called by main() after all WinDivert handles have been initialized.
+ * Until then the service remains START_PENDING and does not accept stop
+ * controls that could race filter creation.
+ */
+void service_report_running(void)
+{
+    if (!hStatus || ServiceStatus.dwCurrentState != SERVICE_START_PENDING)
+        return;
+
+    ServiceStatus.dwCurrentState = SERVICE_RUNNING;
+    ServiceStatus.dwControlsAccepted = SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN;
     ServiceStatus.dwCheckPoint = 0;
     ServiceStatus.dwWaitHint = 0;
     SetServiceStatus(hStatus, &ServiceStatus);

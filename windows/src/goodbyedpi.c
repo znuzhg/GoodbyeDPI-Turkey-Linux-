@@ -160,7 +160,7 @@ enum ERROR_CODE{
 };
 
 static int running_from_service = 0;
-static int exiting = 0;
+static volatile LONG exiting = 0;
 static HANDLE filters[MAX_FILTERS];
 static int filter_num = 0;
 static const char http10_redirect_302[] = "HTTP/1.0 302 ";
@@ -431,6 +431,8 @@ static int deinit(HANDLE handle) {
 }
 
 void deinit_all() {
+    /* Also handle stop requests received during service startup. */
+    InterlockedExchange(&exiting, 1);
     for (int i = 0; i < filter_num; i++) {
         HANDLE handle = filters[i];
         filters[i] = NULL;
@@ -440,7 +442,7 @@ void deinit_all() {
 }
 
 static void sigint_handler(int sig __attribute__((unused))) {
-    exiting = 1;
+    InterlockedExchange(&exiting, 1);
     deinit_all();
     exit(EXIT_SUCCESS);
 }
@@ -1271,10 +1273,11 @@ int main(int argc, char *argv[]) {
         printf("Debug Exit\n");
         exit(EXIT_SUCCESS);
     }
+    service_report_running();
     printf("Filter activated, GoodbyeDPI is now running!\n");
     signal(SIGINT, sigint_handler);
 
-    while (1) {
+    while (InterlockedCompareExchange(&exiting, 0, 0) == 0) {
         if (WinDivertRecv(w_filter, packet, sizeof(packet), &packetLen, &addr)) {
             debug("Got %s packet, len=%d!\n", addr.Outbound ? "outbound" : "inbound",
                    packetLen);
@@ -1657,9 +1660,10 @@ int main(int argc, char *argv[]) {
         }
         else {
             // error, ignore
-            if (!exiting)
+            if (InterlockedCompareExchange(&exiting, 0, 0) == 0)
                 printf("Error receiving packet!\n");
             break;
         }
     }
+    deinit_all();
 }
