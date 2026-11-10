@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <errno.h>
 #include <ctype.h>
 #include <signal.h>
 #include <unistd.h>
@@ -159,7 +160,7 @@ enum ERROR_CODE{
 };
 
 static int running_from_service = 0;
-static int exiting = 0;
+static volatile LONG exiting = 0;
 static HANDLE filters[MAX_FILTERS];
 static int filter_num = 0;
 static const char http10_redirect_302[] = "HTTP/1.0 302 ";
@@ -216,9 +217,21 @@ static void add_filter_str(int proto, int port) {
                       "(tcp.SrcPort == %d or tcp.DstPort == %d))";
 
     char *current_filter = filter_string;
-    size_t new_filter_size = strlen(current_filter) +
+    size_t new_filter_size;
+    char *new_filter;
+
+    if (!current_filter) {
+        fprintf(stderr, "WinDivert filter string is not initialized.\n");
+        exit(EXIT_FAILURE);
+    }
+    new_filter_size = strlen(current_filter) +
             (proto == IPPROTO_UDP ? strlen(udp) : strlen(tcp)) + 16;
-    char *new_filter = malloc(new_filter_size);
+    new_filter = malloc(new_filter_size);
+    if (!new_filter) {
+        fprintf(stderr, "Unable to allocate WinDivert filter string.\n");
+        free(new_filter);
+        exit(EXIT_FAILURE);
+    }
 
     strcpy(new_filter, current_filter);
     if (proto == IPPROTO_UDP)
@@ -234,14 +247,27 @@ static void add_ip_id_str(int id) {
     char *newstr;
     const char *ipid = " or ip.Id == %d";
     char *addfilter = malloc(strlen(ipid) + 16);
+    if (!addfilter) {
+        fprintf(stderr, "Unable to allocate IP-ID filter string.\n");
+        exit(EXIT_FAILURE);
+    }
 
     sprintf(addfilter, ipid, id);
-
     newstr = repl_str(filter_string, IPID_TEMPLATE, addfilter);
+    if (!newstr) {
+        free(addfilter);
+        fprintf(stderr, "Unable to expand IP-ID filter string.\n");
+        exit(EXIT_FAILURE);
+    }
     free(filter_string);
     filter_string = newstr;
 
     newstr = repl_str(filter_passive_string, IPID_TEMPLATE, addfilter);
+    free(addfilter);
+    if (!newstr) {
+        fprintf(stderr, "Unable to expand passive IP-ID filter string.\n");
+        exit(EXIT_FAILURE);
+    }
     free(filter_passive_string);
     filter_passive_string = newstr;
 }
@@ -254,24 +280,46 @@ static void add_maxpayloadsize_str(unsigned short maxpayload) {
           "or tcp.Payload32[0] == 0x47455420 or tcp.Payload32[0] == 0x504F5354 " \
           "or (tcp.Payload[0] == 0x16 and tcp.Payload[1] == 0x03 and tcp.Payload[2] <= 0x03): true)";
     char *addfilter = malloc(strlen(maxpayloadsize_str) + 16);
+    if (!addfilter) {
+        fprintf(stderr, "Unable to allocate max-payload filter string.\n");
+        exit(EXIT_FAILURE);
+    }
 
     sprintf(addfilter, maxpayloadsize_str, maxpayload);
-
     newstr = repl_str(filter_string, MAXPAYLOADSIZE_TEMPLATE, addfilter);
+    free(addfilter);
+    if (!newstr) {
+        fprintf(stderr, "Unable to expand max-payload filter string.\n");
+        exit(EXIT_FAILURE);
+    }
     free(filter_string);
     filter_string = newstr;
 }
 
 static void finalize_filter_strings() {
-    char *newstr, *newstr2;
+    char *newstr;
+    char *newstr2;
 
     newstr2 = repl_str(filter_string, IPID_TEMPLATE, "");
+    if (!newstr2) {
+        fprintf(stderr, "Unable to finalize WinDivert filter string.\n");
+        exit(EXIT_FAILURE);
+    }
     newstr = repl_str(newstr2, MAXPAYLOADSIZE_TEMPLATE, "");
+    if (!newstr) {
+        free(newstr2);
+        fprintf(stderr, "Unable to finalize max-payload filter string.\n");
+        exit(EXIT_FAILURE);
+    }
     free(filter_string);
     free(newstr2);
     filter_string = newstr;
 
     newstr = repl_str(filter_passive_string, IPID_TEMPLATE, "");
+    if (!newstr) {
+        fprintf(stderr, "Unable to finalize passive WinDivert filter string.\n");
+        exit(EXIT_FAILURE);
+    }
     free(filter_passive_string);
     filter_passive_string = newstr;
 }
@@ -291,12 +339,17 @@ static char* dumb_memmem(const char* haystack, unsigned int hlen,
 }
 
 unsigned short int atousi(const char *str, const char *msg) {
-    long unsigned int res = strtoul(str, NULL, 10u);
-    enum {
-        limitValue=0xFFFFu
-    };
+    char *end = NULL;
+    unsigned long res;
 
-    if(res > limitValue) {
+    if (!str || !*str) {
+        puts(msg);
+        exit(ERROR_ATOUSI);
+    }
+
+    errno = 0;
+    res = strtoul(str, &end, 10);
+    if (errno == ERANGE || end == str || !end || *end != '\0' || res > 0xFFFFu) {
         puts(msg);
         exit(ERROR_ATOUSI);
     }
@@ -304,12 +357,17 @@ unsigned short int atousi(const char *str, const char *msg) {
 }
 
 BYTE atoub(const char *str, const char *msg) {
-    long unsigned int res = strtoul(str, NULL, 10u);
-    enum {
-        limitValue=0xFFu
-    };
+    char *end = NULL;
+    unsigned long res;
 
-    if(res > limitValue) {
+    if (!str || !*str) {
+        puts(msg);
+        exit(ERROR_AUTOB);
+    }
+
+    errno = 0;
+    res = strtoul(str, &end, 10);
+    if (errno == ERANGE || end == str || !end || *end != '\0' || res > 0xFFu) {
         puts(msg);
         exit(ERROR_AUTOB);
     }
@@ -317,19 +375,29 @@ BYTE atoub(const char *str, const char *msg) {
 }
 
 
-static HANDLE init(char *filter, UINT64 flags) {
+static HANDLE init(const char *filter_expression, UINT64 flags) {
     LPTSTR errormessage = NULL;
-    DWORD errorcode = 0;
-    filter = WinDivertOpen(filter, WINDIVERT_LAYER_NETWORK, 0, flags);
-    if (filter != INVALID_HANDLE_VALUE)
-        return filter;
+    DWORD errorcode;
+    DWORD message_length;
+    HANDLE handle = WinDivertOpen(filter_expression, WINDIVERT_LAYER_NETWORK, 0, flags);
+
+    if (handle != INVALID_HANDLE_VALUE)
+        return handle;
+
     errorcode = GetLastError();
-    FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
-                  FORMAT_MESSAGE_IGNORE_INSERTS,
-                  NULL, errorcode, MAKELANGID(LANG_ENGLISH, SUBLANG_DEFAULT),
-                  (LPTSTR)&errormessage, 0, NULL);
-    printf("Error opening filter: %lu %s\n", (unsigned long)errorcode, errormessage);
-    LocalFree(errormessage);
+    message_length = FormatMessage(
+        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+        FORMAT_MESSAGE_IGNORE_INSERTS,
+        NULL, errorcode, MAKELANGID(LANG_ENGLISH, SUBLANG_DEFAULT),
+        (LPTSTR)&errormessage, 0, NULL);
+
+    if (message_length && errormessage)
+        printf("Error opening filter: %lu %s\n", (unsigned long)errorcode, errormessage);
+    else
+        printf("Error opening filter: %lu (message unavailable)\n", (unsigned long)errorcode);
+    if (errormessage)
+        LocalFree(errormessage);
+
     if (errorcode == 2)
         printf("The driver files WinDivert32.sys or WinDivert64.sys were not found.\n");
     else if (errorcode == 654)
@@ -348,35 +416,34 @@ static HANDLE init(char *filter, UINT64 flags) {
                "Enable Base Filtering Engine service.\n");
     else if (errorcode == 577)
         printf("Could not load driver due to invalid digital signature.\n"
-               "Windows Server 2016 systems must have secure boot disabled to be \n"
-               "able to load WinDivert driver.\n"
+               "Windows Server 2016 systems must have Secure Boot disabled to load WinDivert.\n"
                "Windows 7 systems must be up-to-date or at least have KB3033929 installed.\n"
-               "https://www.microsoft.com/en-us/download/details.aspx?id=46078\n\n"
-               "WARNING! If you see this error on Windows 7, it means your system is horribly "
-               "outdated and SHOULD NOT BE USED TO ACCESS THE INTERNET!\n"
-               "Most probably, you don't have security patches installed and anyone in you LAN or "
-               "public Wi-Fi network can get full access to your computer (MS17-010 and others).\n"
-               "You should install updates IMMEDIATELY.\n");
+               "https://www.microsoft.com/en-us/download/details.aspx?id=46078\n");
     return NULL;
 }
 
 static int deinit(HANDLE handle) {
-    if (handle) {
-        WinDivertShutdown(handle, WINDIVERT_SHUTDOWN_BOTH);
-        WinDivertClose(handle);
-        return TRUE;
-    }
-    return FALSE;
+    if (!handle || handle == INVALID_HANDLE_VALUE)
+        return FALSE;
+
+    WinDivertShutdown(handle, WINDIVERT_SHUTDOWN_BOTH);
+    return WinDivertClose(handle);
 }
 
 void deinit_all() {
+    /* Also handle stop requests received during service startup. */
+    InterlockedExchange(&exiting, 1);
     for (int i = 0; i < filter_num; i++) {
-        deinit(filters[i]);
+        /* Service control and the receive loop may both enter cleanup. */
+        HANDLE handle = (HANDLE)InterlockedExchangePointer(
+            (PVOID volatile *)&filters[i], NULL);
+        if (handle && handle != INVALID_HANDLE_VALUE)
+            deinit(handle);
     }
 }
 
 static void sigint_handler(int sig __attribute__((unused))) {
-    exiting = 1;
+    InterlockedExchange(&exiting, 1);
     deinit_all();
     exit(EXIT_SUCCESS);
 }
@@ -393,15 +460,21 @@ static void mix_case(char *pktdata, unsigned int pktlen) {
 }
 
 static int is_passivedpi_redirect(const char *pktdata, unsigned int pktlen) {
-    /* First check if this is HTTP 302 redirect */
-    if (memcmp(pktdata, http11_redirect_302, sizeof(http11_redirect_302)-1) == 0 ||
-        memcmp(pktdata, http10_redirect_302, sizeof(http10_redirect_302)-1) == 0)
-    {
-        /* Then check if this is a redirect to new http site with Connection: close */
-        if (dumb_memmem(pktdata, pktlen, location_http, sizeof(location_http)-1) &&
-            dumb_memmem(pktdata, pktlen, connection_close, sizeof(connection_close)-1)) {
-            return TRUE;
-        }
+    const size_t http11_len = sizeof(http11_redirect_302) - 1;
+    const size_t http10_len = sizeof(http10_redirect_302) - 1;
+    int is_http_redirect;
+
+    if (!pktdata)
+        return FALSE;
+
+    is_http_redirect =
+        (pktlen >= http11_len && memcmp(pktdata, http11_redirect_302, http11_len) == 0) ||
+        (pktlen >= http10_len && memcmp(pktdata, http10_redirect_302, http10_len) == 0);
+
+    if (is_http_redirect &&
+        dumb_memmem(pktdata, pktlen, location_http, sizeof(location_http) - 1) &&
+        dumb_memmem(pktdata, pktlen, connection_close, sizeof(connection_close) - 1)) {
+        return TRUE;
     }
     return FALSE;
 }
@@ -445,41 +518,42 @@ static int find_header_and_get_info(const char *pktdata, unsigned int pktlen,
 static int extract_sni(const char *pktdata, unsigned int pktlen,
                     char **hostnameaddr, unsigned int *hostnamelen) {
     unsigned int ptr = 0;
-    unsigned const char *d = (unsigned const char *)pktdata;
-    unsigned const char *hnaddr = 0;
-    int hnlen = 0;
+    const unsigned char *d = (const unsigned char *)pktdata;
 
-    while (ptr + 8 < pktlen) {
-        /* Search for specific Extensions sequence */
-        if (d[ptr] == '\0' && d[ptr+1] == '\0' && d[ptr+2] == '\0' &&
-            d[ptr+4] == '\0' && d[ptr+6] == '\0' && d[ptr+7] == '\0' &&
-            /* Check Extension length, Server Name list length
-            *  and Server Name length relations
-            */
-            d[ptr+3] - d[ptr+5] == 2 && d[ptr+5] - d[ptr+8] == 3)
-            {
-                if (ptr + 8 + d[ptr+8] > pktlen) {
+    if (!pktdata || !hostnameaddr || !hostnamelen)
+        return FALSE;
+    *hostnameaddr = NULL;
+    *hostnamelen = 0;
+
+    while (ptr <= pktlen && pktlen - ptr >= 9) {
+        /* Search for the compact ServerName extension layout used by this parser. */
+        if (d[ptr] == '\0' && d[ptr + 1] == '\0' && d[ptr + 2] == '\0' &&
+            d[ptr + 4] == '\0' && d[ptr + 6] == '\0' && d[ptr + 7] == '\0' &&
+            d[ptr + 3] - d[ptr + 5] == 2 &&
+            d[ptr + 5] - d[ptr + 8] == 3) {
+            size_t name_len = d[ptr + 8];
+            size_t name_offset = (size_t)ptr + 9;
+
+            /* The hostname starts at ptr + 9; include that byte in the bounds check. */
+            if (name_offset > pktlen || name_len > (size_t)pktlen - name_offset)
+                return FALSE;
+            if (name_len < 3 || name_len > HOST_MAXLEN)
+                return FALSE;
+
+            for (size_t i = 0; i < name_len; i++) {
+                unsigned char c = d[name_offset + i];
+                if (!((c >= '0' && c <= '9') ||
+                      (c >= 'a' && c <= 'z') ||
+                      (c >= 'A' && c <= 'Z') ||
+                      c == '.' || c == '-')) {
                     return FALSE;
                 }
-                hnaddr = &d[ptr+9];
-                hnlen = d[ptr+8];
-                /* Limit hostname size up to 253 bytes */
-                if (hnlen < 3 || hnlen > HOST_MAXLEN) {
-                    return FALSE;
-                }
-                /* Validate that hostname has only ascii lowercase characters */
-                for (int i=0; i<hnlen; i++) {
-                    if (!( (hnaddr[i] >= '0' && hnaddr[i] <= '9') ||
-                         (hnaddr[i] >= 'a' && hnaddr[i] <= 'z') ||
-                         hnaddr[i] == '.' || hnaddr[i] == '-'))
-                    {
-                        return FALSE;
-                    }
-                }
-                *hostnameaddr = (char*)hnaddr;
-                *hostnamelen = (unsigned int)hnlen;
-                return TRUE;
             }
+
+            *hostnameaddr = (char *)(d + name_offset);
+            *hostnamelen = (unsigned int)name_len;
+            return TRUE;
+        }
         ptr++;
     }
     return FALSE;
@@ -656,18 +730,17 @@ int main(int argc, char *argv[]) {
 
     if (!running_from_service) {
         running_from_service = 1;
-        if (service_register(argc, argv)) {
-            /* We've been called as a service. Register service
-             * and exit this thread. main() would be called from
-             * service.c next time.
-             *
-             * Note that if service_register() succeedes it does
-             * not return until the service is stopped.
-             * That is why we should set running_from_service
-             * before calling service_register and unset it
-             * afterwards.
-             */
-            return 0;
+        {
+            int service_result = service_register(argc, argv);
+            if (service_result > 0) {
+                /* Service dispatch completed after the service stopped. */
+                return 0;
+            }
+            if (service_result < 0) {
+                fprintf(stderr, "Windows service dispatch failed: %lu\n",
+                        (unsigned long)GetLastError());
+                return EXIT_FAILURE;
+            }
         }
         running_from_service = 0;
     }
@@ -676,6 +749,10 @@ int main(int argc, char *argv[]) {
         filter_string = strdup(FILTER_STRING_TEMPLATE);
     if (filter_passive_string == NULL)
         filter_passive_string = strdup(FILTER_PASSIVE_STRING_TEMPLATE);
+    if (!filter_string || !filter_passive_string) {
+        fprintf(stderr, "Unable to allocate initial WinDivert filter strings.\n");
+        return EXIT_FAILURE;
+    }
 
     printf(
         "GoodbyeDPI " GOODBYEDPI_VERSION
@@ -849,6 +926,10 @@ int main(int argc, char *argv[]) {
                     exit(ERROR_DNS_V4_PORT);
                 }
                 dnsv4_port = atousi(optarg, "DNS port parameter error!");
+                if (dnsv4_port == 0) {
+                    puts("DNS port must be in range 1-65535!");
+                    exit(ERROR_DNS_V4_PORT);
+                }
                 if (dnsv4_port != 53) {
                     add_filter_str(IPPROTO_UDP, dnsv4_port);
                 }
@@ -862,6 +943,10 @@ int main(int argc, char *argv[]) {
                     exit(ERROR_DNS_V6_PORT);
                 }
                 dnsv6_port = atousi(optarg, "DNS port parameter error!");
+                if (dnsv6_port == 0) {
+                    puts("DNS port must be in range 1-65535!");
+                    exit(ERROR_DNS_V6_PORT);
+                }
                 if (dnsv6_port != 53) {
                     add_filter_str(IPPROTO_UDP, dnsv6_port);
                 }
@@ -902,26 +987,35 @@ int main(int argc, char *argv[]) {
 
                 if (optarg) {
                     char *autottl_copy = strdup(optarg);
-                    if (strchr(autottl_copy, '-')) {
-                        // token "-" found, start X-Y parser
-                        char *autottl_current = strtok(autottl_copy, "-");
-                        auto_ttl_1 = atoub(autottl_current, "Set Auto TTL parameter error!");
-                        autottl_current = strtok(NULL, "-");
-                        if (!autottl_current) {
+                    char *first_separator;
+                    if (!autottl_copy) {
+                        puts("Unable to allocate Auto TTL parameter buffer.");
+                        exit(ERROR_AUTOTTL);
+                    }
+
+                    first_separator = strchr(autottl_copy, '-');
+                    if (first_separator) {
+                        char *second_separator;
+                        *first_separator++ = '\0';
+                        second_separator = strchr(first_separator, '-');
+                        if (!*autottl_copy || !second_separator || !second_separator[1]) {
+                            free(autottl_copy);
                             puts("Set Auto TTL parameter error!");
                             exit(ERROR_AUTOTTL);
                         }
-                        auto_ttl_2 = atoub(autottl_current, "Set Auto TTL parameter error!");
-                        autottl_current = strtok(NULL, "-");
-                        if (!autottl_current) {
+                        *second_separator++ = '\0';
+                        if (strchr(second_separator, '-')) {
+                            free(autottl_copy);
                             puts("Set Auto TTL parameter error!");
                             exit(ERROR_AUTOTTL);
                         }
-                        auto_ttl_max = atoub(autottl_current, "Set Auto TTL parameter error!");
+
+                        auto_ttl_1 = atoub(autottl_copy, "Set Auto TTL parameter error!");
+                        auto_ttl_2 = atoub(first_separator, "Set Auto TTL parameter error!");
+                        auto_ttl_max = atoub(second_separator, "Set Auto TTL parameter error!");
                     }
                     else {
-                        // single digit parser
-                        auto_ttl_2 = atoub(optarg, "Set Auto TTL parameter error!");
+                        auto_ttl_2 = atoub(autottl_copy, "Set Auto TTL parameter error!");
                         auto_ttl_1 = auto_ttl_2;
                     }
                     free(autottl_copy);
@@ -982,7 +1076,7 @@ int main(int argc, char *argv[]) {
                 debug_exit = true;
                 break;
             default:
-                puts("Usage: goodbyedpi.exe [OPTION...]\n"
+                fputs("Usage: goodbyedpi.exe [OPTION...]\n"
                 " -p          block passive DPI\n"
                 " -q          block QUIC/HTTP3\n"
                 " -r          replace Host with hoSt\n"
@@ -1013,8 +1107,9 @@ int main(int argc, char *argv[]) {
                 "                          by a2. If it's longer, (a1; a2) scale is used with the distance as a weight.\n"
                 "                          If the resulting TTL is more than m(ax), set it to m.\n"
                 "                          Default (if set): --auto-ttl 1-4-10. Also sets --min-ttl 3.\n"
-                "                          DANGEROUS! May break websites in unexpected ways. Use with care (or --blacklist).\n"
-                " --min-ttl     <value>    minimum TTL distance (128/64 - TTL) for which to send Fake Request\n"
+                "                          DANGEROUS! May break websites in unexpected ways. Use with care (or --blacklist).\n",
+                stdout);
+                fputs(" --min-ttl     <value>    minimum TTL distance (128/64 - TTL) for which to send Fake Request\n"
                 "                          in --set-ttl and --auto-ttl modes.\n"
                 " --wrong-chksum           activate Fake Request Mode and send it with incorrect TCP checksum.\n"
                 "                          May not work in a VM or with some routers, but is safer than set-ttl.\n"
@@ -1042,7 +1137,7 @@ int main(int argc, char *argv[]) {
                 "                          (like file transfers) in already established sessions.\n"
                 "                          May skip some huge HTTP requests from being processed.\n"
                 "                          Default (if set): --max-payload 1200.\n"
-                "\n");
+                "\n", stdout);
                 puts("LEGACY modesets:\n"
                 " -1          -p -r -s -f 2 -k 2 -n -e 2 (most compatible mode)\n"
                 " -2          -p -r -s -f 2 -k 2 -n -e 40 (better speed for HTTPS yet still compatible)\n"
@@ -1179,10 +1274,11 @@ int main(int argc, char *argv[]) {
         printf("Debug Exit\n");
         exit(EXIT_SUCCESS);
     }
+    service_report_running();
     printf("Filter activated, GoodbyeDPI is now running!\n");
     signal(SIGINT, sigint_handler);
 
-    while (1) {
+    while (InterlockedCompareExchange(&exiting, 0, 0) == 0) {
         if (WinDivertRecv(w_filter, packet, sizeof(packet), &packetLen, &addr)) {
             debug("Got %s packet, len=%d!\n", addr.Outbound ? "outbound" : "inbound",
                    packetLen);
@@ -1287,11 +1383,11 @@ int main(int argc, char *argv[]) {
                            )
                         {
 #ifdef DEBUG
-                            char lsni[HOST_MAXLEN + 1] = {0};
-                            extract_sni(packet_data, packet_dataLen,
-                                        &host_addr, &host_len);
-                            memcpy(lsni, host_addr, host_len);
-                            printf("Blocked HTTPS website SNI: %s\n", lsni);
+                            if (sni_ok && host_addr && host_len <= HOST_MAXLEN) {
+                                char lsni[HOST_MAXLEN + 1] = {0};
+                                memcpy(lsni, host_addr, host_len);
+                                printf("Blocked HTTPS website SNI: %s\n", lsni);
+                            }
 #endif
                             if (do_fake_packet) {
                                 TCP_HANDLE_OUTGOING_FAKE_PACKET(send_fake_https_request);
@@ -1565,9 +1661,10 @@ int main(int argc, char *argv[]) {
         }
         else {
             // error, ignore
-            if (!exiting)
+            if (InterlockedCompareExchange(&exiting, 0, 0) == 0)
                 printf("Error receiving packet!\n");
             break;
         }
     }
+    deinit_all();
 }

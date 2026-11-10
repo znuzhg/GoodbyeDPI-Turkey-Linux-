@@ -36,7 +36,7 @@
 typedef struct udp_connrecord {
     char key[UDP_CONNRECORD_KEY_LEN]; // Lookup key
     time_t time;         // Time when record was added
-    uint32_t *dstip;   // Destination IP (can be IPv4 or IPv6)
+    uint32_t dstip[4]; // Destination IP storage (IPv4 or IPv6)
     uint16_t dstport;    // Destination port
     UT_hash_handle hh;   // Makes this structure hashable with uthash
 } udp_connrecord_t;
