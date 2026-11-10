@@ -1,127 +1,192 @@
 /*
- * Blacklist for GoodbyeDPI HTTP DPI circumvention tricks
- *
- * This is a simple domain hash table.
- * Domain records are added from a text file, where every
- * domain is separated with a new line.
+ * Blacklist for GoodbyeDPI HTTP DPI circumvention tricks.
+ * Hostname comparisons are case-insensitive, as required by DNS.
  */
 #include <windows.h>
 #include <stdio.h>
+#include <ctype.h>
+#include <string.h>
+#include <stdlib.h>
 #include "goodbyedpi.h"
 #include "utils/uthash.h"
 #include "utils/getline.h"
 
-// Domain record structure using uthash for hash table implementation
 typedef struct blackwhitelist_record {
-    const char *host;         // Domain hostname
-    UT_hash_handle hh;        // Makes this structure hashable
+    const char *host;
+    UT_hash_handle hh;
 } blackwhitelist_record_t;
 
 static blackwhitelist_record_t *blackwhitelist = NULL;
 
-/**
- * Check if a hostname exists in the blackwhitelist
- */
+/* Normalize an ASCII DNS hostname in-place. Host headers may include :port. */
+static int normalize_hostname(char *host, int strip_port) {
+    size_t len;
+    char *start;
+    char *colon;
+
+    if (!host)
+        return FALSE;
+
+    start = host;
+    while (*start && isspace((unsigned char)*start))
+        start++;
+    if (start != host)
+        memmove(host, start, strlen(start) + 1);
+
+    len = strlen(host);
+    while (len > 0 && isspace((unsigned char)host[len - 1]))
+        host[--len] = '\0';
+
+    if (strip_port) {
+        /* Bracketed IPv6 literals are not domain names in this blacklist. */
+        if (host[0] == '[')
+            return FALSE;
+        colon = strchr(host, ':');
+        if (colon) {
+            char *port = colon + 1;
+            if (!*port)
+                return FALSE;
+            for (char *p = port; *p; p++) {
+                if (*p < '0' || *p > '9')
+                    return FALSE;
+            }
+            *colon = '\0';
+        }
+    }
+
+    len = strlen(host);
+    if (len > 0 && host[len - 1] == '.')
+        host[--len] = '\0';
+    if (len < 2 || len > HOST_MAXLEN)
+        return FALSE;
+
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)host[i];
+        if (c > 0x7F)
+            return FALSE;
+        host[i] = (char)tolower(c);
+    }
+
+    return TRUE;
+}
+
 static int check_get_hostname(const char *host) {
     blackwhitelist_record_t *tmp_record = NULL;
-    if (!blackwhitelist) return FALSE;
+    if (!blackwhitelist || !host)
+        return FALSE;
 
     HASH_FIND_STR(blackwhitelist, host, tmp_record);
     if (tmp_record) {
         debug("check_get_hostname found host\n");
         return TRUE;
     }
-    debug("check_get_hostname host not found\n");
     return FALSE;
 }
 
-/**
- * Add a hostname to the blackwhitelist if it doesn't already exist
- */
 static int add_hostname(const char *host) {
+    char normalized[HOST_MAXLEN + 1];
+    size_t len;
+    blackwhitelist_record_t *tmp_record;
+    char *host_copy;
+
     if (!host)
         return FALSE;
 
-    if (check_get_hostname(host))
+    len = strlen(host);
+    if (len > HOST_MAXLEN)
+        return FALSE;
+    memcpy(normalized, host, len + 1);
+    if (!normalize_hostname(normalized, FALSE))
         return FALSE;
 
-    blackwhitelist_record_t *tmp_record = malloc(sizeof(*tmp_record));
+    if (check_get_hostname(normalized))
+        return FALSE;
+
+    tmp_record = malloc(sizeof(*tmp_record));
     if (!tmp_record)
         return FALSE;
 
-    char *host_c = strdup(host);
-    if (!host_c) {
+    host_copy = strdup(normalized);
+    if (!host_copy) {
         free(tmp_record);
         return FALSE;
     }
 
-    tmp_record->host = host_c;
+    tmp_record->host = host_copy;
     HASH_ADD_KEYPTR(hh, blackwhitelist, tmp_record->host,
                     strlen(tmp_record->host), tmp_record);
-    debug("Added host %s\n", host_c);
+    debug("Added host %s\n", host_copy);
     return TRUE;
 }
 
-/**
- * Load a list of hostnames from a file into the blackwhitelist
- */
+/* Load domains from a newline-separated text file. Returns TRUE on success. */
 int blackwhitelist_load_list(const char *filename) {
     size_t linelen = HOST_MAXLEN + 1;
-    int cnt = 0;
+    int count = 0;
     ssize_t read;
-    FILE *fp = fopen(filename, "r");
+    FILE *fp;
+    char *line;
+
+    if (!filename)
+        return FALSE;
+
+    fp = fopen(filename, "r");
     if (!fp)
         return FALSE;
 
-    char *line = malloc(HOST_MAXLEN + 1);
+    line = malloc(HOST_MAXLEN + 1);
     if (!line) {
         fclose(fp);
         return FALSE;
     }
 
     while ((read = getline(&line, &linelen, fp)) != -1) {
-        /* works with both \n and \r\n */
+        size_t len;
+        (void)read;
+
         line[strcspn(line, "\r\n")] = '\0';
-        if (strlen(line) > HOST_MAXLEN) {
-            printf("WARNING: host %s exceeds maximum host length and has not been added\n",
-                line);
+        len = strlen(line);
+        if (len > HOST_MAXLEN) {
+            printf("WARNING: host entry exceeds maximum length and was skipped\n");
             continue;
         }
-        if (strlen(line) < 2) {
-            printf("WARNING: host %s is less than 2 characters, skipping\n", line);
+        if (len == 0 || line[0] == '#' || line[0] == ';')
             continue;
-        }
         if (add_hostname(line))
-            cnt++;
+            count++;
     }
+
     free(line);
-    if (!blackwhitelist) {
+    if (ferror(fp)) {
         fclose(fp);
         return FALSE;
     }
-    printf("Loaded %d hosts from file %s\n", cnt, filename);
+
     fclose(fp);
+    if (!blackwhitelist)
+        return FALSE;
+
+    printf("Loaded %d hosts from file %s\n", count, filename);
     return TRUE;
 }
 
-/**
- * Check if a hostname or any of its parent domains are in the blackwhitelist
- * Example: checks sub.domain.com, domain.com, and com
- */
 int blackwhitelist_check_hostname(const char *host_addr, size_t host_len) {
     char current_host[HOST_MAXLEN + 1];
-    char *tokenized_host = NULL;
+    char *tokenized_host;
 
     if (!host_addr || host_len == 0 || host_len > HOST_MAXLEN)
         return FALSE;
+
     memcpy(current_host, host_addr, host_len);
     current_host[host_len] = '\0';
+    if (!normalize_hostname(current_host, TRUE))
+        return FALSE;
 
     if (check_get_hostname(current_host))
-            return TRUE;
+        return TRUE;
 
     tokenized_host = strchr(current_host, '.');
-    while (tokenized_host != NULL && tokenized_host < (current_host + HOST_MAXLEN)) {
+    while (tokenized_host) {
         if (check_get_hostname(tokenized_host + 1))
             return TRUE;
         tokenized_host = strchr(tokenized_host + 1, '.');

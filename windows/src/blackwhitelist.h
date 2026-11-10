@@ -1,4 +1,4 @@
-// Load domains from list file (0 on success)
+// Load domains from list file (TRUE on success, FALSE on failure)
 int blackwhitelist_load_list(const char *filename);
 
 // Check hostname against list, returns match status

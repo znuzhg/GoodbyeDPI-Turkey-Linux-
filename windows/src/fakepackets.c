@@ -156,50 +156,61 @@ static int send_fake_data(const HANDLE w_filter,
                          ) {
     char packet_fake[MAX_PACKET_SIZE];
     WINDIVERT_ADDRESS addr_new;
-    PVOID packet_data;
-    UINT packet_dataLen;
+    PVOID packet_data = NULL;
+    UINT packet_dataLen = 0;
     UINT packetLen_new;
-    PWINDIVERT_IPHDR ppIpHdr;
-    PWINDIVERT_IPV6HDR ppIpV6Hdr;
-    PWINDIVERT_TCPHDR ppTcpHdr;
-    unsigned const char *fake_request_data = is_https ? fake_https_request : fake_http_request;
-    UINT fake_request_size = is_https ? sizeof(fake_https_request) : sizeof(fake_http_request) - 1;
+    PWINDIVERT_IPHDR ppIpHdr = NULL;
+    PWINDIVERT_IPV6HDR ppIpV6Hdr = NULL;
+    PWINDIVERT_TCPHDR ppTcpHdr = NULL;
+    const unsigned char *fake_request_data = is_https ? fake_https_request : fake_http_request;
+    size_t fake_request_size = is_https ? sizeof(fake_https_request) : sizeof(fake_http_request) - 1;
+
     if (fake_data) {
         fake_request_data = fake_data->data;
         fake_request_size = fake_data->size;
     }
 
-    memcpy(&addr_new, addr, sizeof(WINDIVERT_ADDRESS));
+    /* Validate every caller-controlled length before copying into the fixed-size buffer. */
+    if (!w_filter || w_filter == INVALID_HANDLE_VALUE || !addr || !pkt ||
+        !fake_request_data || packetLen == 0 || packetLen > sizeof(packet_fake) ||
+        fake_request_size == 0 || fake_request_size > sizeof(packet_fake)) {
+        return 2;
+    }
+
+    memcpy(&addr_new, addr, sizeof(addr_new));
     memcpy(packet_fake, pkt, packetLen);
 
     addr_new.TCPChecksum = 0;
     addr_new.IPChecksum = 0;
 
     if (!is_ipv6) {
-        // IPv4 TCP Data packet
         if (!WinDivertHelperParsePacket(packet_fake, packetLen, &ppIpHdr,
             NULL, NULL, NULL, NULL, &ppTcpHdr, NULL, &packet_data, &packet_dataLen,
-            NULL, NULL))
+            NULL, NULL) || !ppIpHdr) {
             return 1;
+        }
     }
     else {
-        // IPv6 TCP Data packet
         if (!WinDivertHelperParsePacket(packet_fake, packetLen, NULL,
             &ppIpV6Hdr, NULL, NULL, NULL, &ppTcpHdr, NULL, &packet_data, &packet_dataLen,
-            NULL, NULL))
+            NULL, NULL) || !ppIpV6Hdr) {
             return 1;
+        }
     }
 
-    if (packetLen + fake_request_size + 1 > MAX_PACKET_SIZE)
+    if (!ppTcpHdr || !packet_data || packet_dataLen == 0 || packet_dataLen > packetLen)
+        return 1;
+
+    /* Replace the existing payload; only the resulting packet must fit. */
+    if ((size_t)(packetLen - packet_dataLen) > sizeof(packet_fake) - fake_request_size)
         return 2;
 
+    packetLen_new = (UINT)((size_t)(packetLen - packet_dataLen) + fake_request_size);
     memcpy(packet_data, fake_request_data, fake_request_size);
-    packetLen_new = packetLen - packet_dataLen + fake_request_size;
 
     if (!is_ipv6) {
         ppIpHdr->Length = htons(
-            ntohs(ppIpHdr->Length) -
-            packet_dataLen + fake_request_size
+            (u_short)(ntohs(ppIpHdr->Length) - packet_dataLen + fake_request_size)
         );
 
         if (set_ttl)
@@ -207,8 +218,7 @@ static int send_fake_data(const HANDLE w_filter,
     }
     else {
         ppIpV6Hdr->Length = htons(
-            ntohs(ppIpV6Hdr->Length) -
-            packet_dataLen + fake_request_size
+            (u_short)(ntohs(ppIpV6Hdr->Length) - packet_dataLen + fake_request_size)
         );
 
         if (set_ttl)
@@ -216,29 +226,27 @@ static int send_fake_data(const HANDLE w_filter,
     }
 
     if (set_seq) {
-        // This is the smallest ACK drift Linux can't handle already, since at least v2.6.18.
-        // https://github.com/torvalds/linux/blob/v2.6.18/net/netfilter/nf_conntrack_proto_tcp.c#L395
+        /* Keep the existing sequence/acknowledgement evasion offsets. */
         ppTcpHdr->AckNum = htonl(ntohl(ppTcpHdr->AckNum) - 66000);
-        // This is just random, no specifics about this value.
         ppTcpHdr->SeqNum = htonl(ntohl(ppTcpHdr->SeqNum) - 10000);
     }
 
-    // Recalculate the checksum
-    WinDivertHelperCalcChecksums(packet_fake, packetLen_new, &addr_new, 0ULL);
+    if (!WinDivertHelperCalcChecksums(packet_fake, packetLen_new, &addr_new, 0ULL)) {
+        debug("Fake packet checksum calculation failed");
+        return 3;
+    }
 
     if (set_checksum) {
-        // ...and damage it
-        ppTcpHdr->Checksum = htons(ntohs(ppTcpHdr->Checksum) - 1);
+        /* Deliberately damage the checksum after recalculation. */
+        ppTcpHdr->Checksum = htons((u_short)(ntohs(ppTcpHdr->Checksum) - 1));
     }
-    //printf("Pseudo checksum: %d\n", addr_new.TCPChecksum);
 
-    WinDivertSend(
-        w_filter, packet_fake,
-        packetLen_new,
-        NULL, &addr_new
-    );
+    if (!WinDivertSend(w_filter, packet_fake, packetLen_new, NULL, &addr_new)) {
+        debug("WinDivertSend failed for fake packet: %lu", (unsigned long)GetLastError());
+        return 3;
+    }
+
     debug("Fake packet: OK");
-
     return 0;
 }
 
@@ -253,25 +261,25 @@ static int send_fake_request(const HANDLE w_filter,
                                   const BYTE set_seq,
                                   const struct fake_t *fake_data
                                  ) {
-    if (set_ttl) {
-        send_fake_data(w_filter, addr, pkt, packetLen,
-                          is_ipv6, is_https,
-                          set_ttl, FALSE, FALSE,
-                          fake_data);
+    int failures = 0;
+
+    if (set_ttl && send_fake_data(w_filter, addr, pkt, packetLen,
+                                  is_ipv6, is_https, set_ttl, FALSE, FALSE,
+                                  fake_data) != 0) {
+        failures++;
     }
-    if (set_checksum) {
-        send_fake_data(w_filter, addr, pkt, packetLen,
-                          is_ipv6, is_https,
-                          FALSE, set_checksum, FALSE,
-                          fake_data);
+    if (set_checksum && send_fake_data(w_filter, addr, pkt, packetLen,
+                                       is_ipv6, is_https, FALSE, set_checksum, FALSE,
+                                       fake_data) != 0) {
+        failures++;
     }
-    if (set_seq) {
-        send_fake_data(w_filter, addr, pkt, packetLen,
-                          is_ipv6, is_https,
-                          FALSE, FALSE, set_seq,
-                          fake_data);
+    if (set_seq && send_fake_data(w_filter, addr, pkt, packetLen,
+                                  is_ipv6, is_https, FALSE, FALSE, set_seq,
+                                  fake_data) != 0) {
+        failures++;
     }
-    return 0;
+
+    return failures;
 }
 
 int send_fake_http_request(const HANDLE w_filter,
@@ -283,18 +291,15 @@ int send_fake_http_request(const HANDLE w_filter,
                                   const BYTE set_checksum,
                                   const BYTE set_seq
                                  ) {
-    int ret = 0;
-    for (int i=0; i<fakes_count || i == 0; i++) {
-        for (int j=0; j<fakes_resend; j++)
-            if (send_fake_request(w_filter, addr, pkt, packetLen,
-                            is_ipv6, FALSE,
-                            set_ttl, set_checksum, set_seq,
-                            fakes[i]))
-            {
-                ret++;
-            }
+    int failures = 0;
+    for (int i = 0; i < fakes_count || i == 0; i++) {
+        for (int j = 0; j < fakes_resend; j++) {
+            failures += send_fake_request(w_filter, addr, pkt, packetLen,
+                                           is_ipv6, FALSE, set_ttl, set_checksum,
+                                           set_seq, fakes[i]);
+        }
     }
-    return ret;
+    return failures;
 }
 
 int send_fake_https_request(const HANDLE w_filter,
@@ -306,18 +311,15 @@ int send_fake_https_request(const HANDLE w_filter,
                                    const BYTE set_checksum,
                                    const BYTE set_seq
                                  ) {
-    int ret = 0;
-    for (int i=0; i<fakes_count || i == 0; i++) {
-        for (int j=0; j<fakes_resend; j++)
-            if (send_fake_request(w_filter, addr, pkt, packetLen,
-                          is_ipv6, TRUE,
-                          set_ttl, set_checksum, set_seq,
-                          fakes[i]))
-            {
-                ret++;
-            }
+    int failures = 0;
+    for (int i = 0; i < fakes_count || i == 0; i++) {
+        for (int j = 0; j < fakes_resend; j++) {
+            failures += send_fake_request(w_filter, addr, pkt, packetLen,
+                                           is_ipv6, TRUE, set_ttl, set_checksum,
+                                           set_seq, fakes[i]);
+        }
     }
-    return ret;
+    return failures;
 }
 
 static int fake_add(const unsigned char *data, size_t size) {
@@ -347,6 +349,8 @@ static int fake_add(const unsigned char *data, size_t size) {
 }
 
 int fake_load_from_hex(const char *data) {
+    if (!data)
+        return 1;
     size_t len = strlen(data);
     if (len < 2 || len % 2 || len > (1420 * 2))
         return 1;

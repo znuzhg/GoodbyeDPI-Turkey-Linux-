@@ -315,9 +315,8 @@ foreach ($driverFile in $driverFiles) {
 }
 
 $binDir = Join-Path $windowsDir 'bin'
-if (Test-Path -LiteralPath $binDir) {
-    Remove-Item -LiteralPath $binDir -Recurse -Force
-}
+# Preserve unrelated user files in windows\bin. Replace only the executable
+# and the verified WinDivert runtime files produced by this build.
 New-Item -ItemType Directory -Force -Path $binDir | Out-Null
 Copy-Item -LiteralPath $builtExe -Destination $binDir -Force
 $runtimeFiles | Copy-Item -Destination $binDir -Force
